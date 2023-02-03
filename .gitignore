@@ -1,0 +1,16 @@
+2022-11-15/
+env/*.ext3
+2022-11-15.zip
+data.hdf5
+results/
+sbatch/*.out
+
+lib/__pycache__/
+lib/knn/__pycache__/
+lib/knn/build/
+lib/knn/dist/
+lib/knn/knn_pytorch.egg-info/
+lib/ransac_voting/__pycache__/
+lib/ransac_voting/build/
+lib/ransac_voting/dist/
+lib/ransac_voting/ransac_voting_3d.egg-info/
