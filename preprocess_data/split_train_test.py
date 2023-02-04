@@ -1,42 +1,39 @@
 import os
-import glob
 import random
 import h5py
-import json
-from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 
-use_ratio = 0.025 * 0.1
+use_ratio = 0.025
 test_ratio = 0.1
-data_dir = '/scratch/gc2720/2301_sim2real/datasets_pose_estimation_yaoen/data/'
-folders = glob.glob(data_dir + '*')
+data_path = '../data.hdf5'
+oroot = '../train_test/'
 
-for folder in tqdm(folders):
-    print(folder)
-    instances = []
-    images = glob.glob(os.path.join(folder, 'label', '*.json'))
-    for image in images:
-        i = image.split('/')[-1].split('.')[0]
-        with open(image, 'r') as f_json:
-            js = json.load(f_json)['instances'].keys()
-            for j in js:
-                instances.append(i+'_'+j)
+h = h5py.File(data_path, 'r')
 
-    # with json.load(os.path.join(folder, 'mask.hdf5'), 'r') as f_h5:
-    #     for i in f_h5.keys():
-    #         if len(f_h5[i].keys()) == 0:
-    #             continue
-    #         for j in f_h5[i].keys():
-    #             instances.append('i'+'_'+'j')
+for company_name in h:
+    company = h[company_name]
+    for part_name in company:
+        opath = os.path.join(oroot, part_name)
+        os.makedirs(opath, exist_ok=True)
+        part = company[part_name]
+        for condition_name in part:
+            instance_list = []
+            condition = part[condition_name]
+            print(f'found {len(condition.keys())} images in {condition.name}')
+            for image_name in condition:
+                image = condition[image_name]
+                for instance_name in image:
+                    if instance_name in ['height', 'width', 'K', 'depth', 'color']: continue
+                    name = image_name + '_' + instance_name
+                    instance_list.append(name)
 
-    # instances = glob.glob(os.path.join(folder, 'label', '*.json'))
-    # instances = [i.split('/')[-1].split('.')[0] for i in instances]
-    n_use = int(use_ratio * len(instances))
-    instances = random.sample(instances, n_use)
-    # instances_train = [i for i in instances if i not in instances_test]
-    train, test = train_test_split(instances, test_size=test_ratio)
+            n_use = int(use_ratio * len(instance_list))
+            instances = random.sample(instance_list, n_use)
+            train, test = train_test_split(instances, test_size=test_ratio)
 
-    with open(os.path.join(folder, 'test.txt'), 'w') as f:
-        f.write('\n'.join(test))
-    with open(os.path.join(folder, 'train.txt'), 'w') as f:
-        f.write('\n'.join(train))
+            with open(os.path.join(opath, 'test.txt'), 'w') as f:
+                f.write('\n'.join(test))
+            with open(os.path.join(opath, 'train.txt'), 'w') as f:
+                f.write('\n'.join(train))
+
+h.close()

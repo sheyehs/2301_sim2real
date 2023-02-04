@@ -12,8 +12,7 @@ hdf5_path = '/scratch/gc2720/2301_sim2real/data.hdf5'
 
 """
 data.hdf5 hierarchy
-company | part  | model_info
-                | condition | image | height
+company | part  | condition | image | height
                                     | width
                                     | K
                                     | depth
@@ -34,9 +33,9 @@ h = h5py.File(hdf5_path, "r")
 
 print()
 print('recursive listing...')
-print('find company:', h.keys())
-print('find part:', h[f'{company}'].keys())
-print('find condition:', h[f'{company}/{part}'].keys())
+print('find company:', list(h.keys()))
+print('find part:', list(h[f'{company}'].keys()))
+print('find condition:', list(h[f'{company}/{part}'].keys()))
 print('find number of images:', len(h[f'{company}/{part}/{condition}'].keys()))
 print('find number of instances:', len(h[f'{company}/{part}/{condition}/{image}'].keys()))
 print()

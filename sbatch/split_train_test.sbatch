@@ -1,7 +1,7 @@
 #!/bin/bash
 
-#SBATCH --job-name=extract_instances
-#SBATCH --output=extract_instances.out
+#SBATCH --job-name=split_train_test
+#SBATCH --output=split_train_test.out
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=20
@@ -13,9 +13,9 @@
 module purge
 
 singularity exec --nv \
-	    --overlay /scratch/gc2720/2301_sim2real/env/environment_data.ext3:ro \
+	    --overlay /scratch/gc2720/2301_sim2real/env/environment_train.ext3:ro \
 	    /scratch/work/public/singularity/cuda11.2.2-cudnn8-devel-ubuntu20.04.sif \
 	    /bin/bash -c "source /ext3/env.sh;
                       cd /scratch/gc2720/2301_sim2real/preprocess_data;
-                      python extract_instances.py"
+                      python split_train_test.py"
 					  

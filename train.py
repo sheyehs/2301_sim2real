@@ -5,7 +5,6 @@ import time
 import numpy as np
 import torch
 from torch.autograd import Variable
-# import tensorflow as tf
 from torch.utils.tensorboard import SummaryWriter
 from datasets.ycb.dataset import PoseDataset as PoseDataset_ycb
 from datasets.linemod.dataset import PoseDataset as PoseDataset_linemod
@@ -18,7 +17,6 @@ from lib.knn.__init__ import KNearestNeighbor
 from lib.utils import setup_logger
 
 parser = argparse.ArgumentParser()
-# parser.add_argument('--dataset', type=str, default='linemod', help='ycb or linemod')
 parser.add_argument('--dataset', type=str, default='robotics')
 parser.add_argument('--gpu_id', type=str, default='0', help='GPU id')
 parser.add_argument('--num_rot', type=int, default=60, help='number of rotation anchors')
@@ -49,10 +47,10 @@ def main():
         opt.result_dir = 'results/linemod'
         opt.repeat_epoch = 10
     elif opt.dataset == 'robotics':
-        opt.dataset_root = '/scratch/gc2720/2301_sim2real/datasets_pose_estimation_yaoen'
+        opt.dataset_root = './data.hdf5'
         opt.num_objects = 10 
-        opt.num_points = 500  # to do
-        opt.result_dir = 'results/robotics'
+        opt.num_points = 500
+        opt.result_dir = 'results/'
         opt.repeat_epoch = 10
     else:
         print('unknown dataset')
@@ -121,7 +119,7 @@ def main():
         for rep in range(opt.repeat_epoch):
             for i, data in enumerate(dataloader, 0):
                 points, choose, img, target_t, target_r, model_points, idx, gt_t = data
-                obj_diameter = opt.diameters[idx.item()+1]
+                obj_diameter = opt.diameters[idx.item()]
                 points, choose, img, target_t, target_r, model_points, idx = Variable(points).cuda(), \
                                                                              Variable(choose).cuda(), \
                                                                              Variable(img).cuda(), \
@@ -176,7 +174,7 @@ def main():
 
         for j, data in enumerate(testdataloader, 0):
             points, choose, img, target_t, target_r, model_points, idx, gt_t = data
-            obj_diameter = opt.diameters[idx.item()+1]
+            obj_diameter = opt.diameters[idx.item()]
             points, choose, img, target_t, target_r, model_points, idx = Variable(points).cuda(), \
                                                                          Variable(choose).cuda(), \
                                                                          Variable(img).cuda(), \
@@ -206,7 +204,7 @@ def main():
                 dis = np.mean(np.linalg.norm(pred - target, axis=1))
             logger.info('Test time {0} Test Frame No.{1} loss:{2:f} confidence:{3:f} distance:{4:f}'.format(
                 time.strftime("%Hh %Mm %Ss", time.gmtime(time.time() - st_time)), test_count, loss, how_min[0].item(), dis))
-            if dis < 0.1 * opt.diameters[idx.item()+1]:
+            if dis < 0.1 * opt.diameters[idx.item()]:
                 success_count[idx[0].item()] += 1
             num_count[idx[0].item()] += 1
             test_dis += dis

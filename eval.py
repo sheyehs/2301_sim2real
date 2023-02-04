@@ -12,17 +12,15 @@ from lib.knn.__init__ import KNearestNeighbor
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--gpu_id', type=str, default='0', help='GPU id')
-parser.add_argument('--model', type=str, default='trained_models/linemod/pose_model_40_0.009487.pth',  help='Evaluation model')
-parser.add_argument('--dataset_root', type=str, default='datasets/linemod/Linemod_preprocessed', help='dataset root dir')
+parser.add_argument('--model', type=str, default='results/robotics/pose_model_49_0.046507.pth',  help='Evaluation model')
+parser.add_argument('--dataset_root', type=str, default='data.hdf5d', help='dataset root dir')
 opt = parser.parse_args()
 
-num_objects = 13
-objlist = [1, 2, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15]
+num_objects = 10
 num_points = 500
 num_rotations = 60
 bs = 1
-dataset_config_dir = 'datasets/linemod/dataset_config'
-output_result_dir = 'results/eval_linemod'
+output_result_dir = 'results/eval_robotics'
 if not os.path.exists(output_result_dir):
     os.makedirs(output_result_dir)
 knn = KNearestNeighbor(1)
