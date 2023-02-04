@@ -1,4 +1,3 @@
-
 setfacl -m u:yw5458:r-x /scratch/gc2720
 setfacl -m u:yw5458:r-x /scratch/gc2720/2301_sim2real
 setfacl -m u:yw5458:r-x /scratch/gc2720/2301_sim2real/data.hdf5

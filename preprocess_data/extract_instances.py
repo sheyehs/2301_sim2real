@@ -125,7 +125,7 @@ if __name__ == '__main__':
             part_dir = os.path.join(company_dir, part_name)
             condition_list = [c for c in os.listdir(part_dir) if c.endswith('synthetic')]
             pcd_one = extract_pcd(part_dir)
-            for condition_name in tqdm(condition_list):
+            for condition_name in condition_list:
                 condition_grp = part_grp.require_group(condition_name)
                 condition_dir = os.path.join(part_dir, condition_name)
                 image_list = [i.split('.')[0] for i in os.listdir(os.path.join(condition_dir, 'depth'))]
