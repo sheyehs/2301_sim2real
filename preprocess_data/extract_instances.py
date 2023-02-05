@@ -8,9 +8,19 @@ from multiprocessing import Pool, cpu_count
 from functools import partial
 import h5py
 
+data_type = 'real'
+
+if data_type == 'synthetic':
+    output_name = 'data'
+elif data_type == 'real':
+    output_name = 'data_real'
+else:
+    print('Invalid data type.')
+    exit()
+
 
 data_dir = '/scratch/gc2720/2301_sim2real/2022-11-15'
-hdf5_path = '/scratch/gc2720/2301_sim2real/data.hdf5'
+hdf5_path = f'/scratch/gc2720/2301_sim2real/{output_name}.hdf5'
 company_list = ["SongFeng", "Toyota","ZSRobot"]
 downsample_factor = 3  # (1200, 1920) -> (400, 640)
 
@@ -100,6 +110,8 @@ def extract_instances_from_one_image(image_name, condition_dir, condition_grp, p
         pixels_list.append(pixels)
         # instance_grp.create_dataset('mask', data=mask)
 
+    if len(pixels_list) == 0:
+        return
     pixels_all = np.concatenate(pixels_list, axis=1)
     pixels_all = filter_nearest_pixels(pixels_all)
     
@@ -123,7 +135,10 @@ if __name__ == '__main__':
         for part_name in part_list:
             part_grp = company_grp.require_group(part_name)
             part_dir = os.path.join(company_dir, part_name)
-            condition_list = [c for c in os.listdir(part_dir) if c.endswith('synthetic')]
+            if data_type == 'synthetic':
+                condition_list = [c for c in os.listdir(part_dir) if c.endswith('synthetic')]
+            elif data_type == 'real':
+                condition_list = [c for c in os.listdir(part_dir) if not c.endswith('info') and not c.endswith('synthetic')]
             pcd_one = extract_pcd(part_dir)
             for condition_name in condition_list:
                 condition_grp = part_grp.require_group(condition_name)
@@ -131,14 +146,6 @@ if __name__ == '__main__':
                 image_list = [i.split('.')[0] for i in os.listdir(os.path.join(condition_dir, 'depth'))]
                 print(f"found {len(image_list)} images in {condition_dir}")
                 image_list.sort()
-
-                # f = partial(
-                #     extract_instances_from_one_image, 
-                #     condition_dir=condition_dir, condition_grp=condition_grp.name, pcd_one=pcd_one
-                #     # pool cannot pass h5py object, so pass its name and retieve back whithin the function
-                # )
-                # with Pool(cpu_count()) as p:
-                #     p.map(f, image_list)
                 
                 for image_name in tqdm(image_list):
                     extract_instances_from_one_image(image_name, condition_dir, condition_grp.name, pcd_one)

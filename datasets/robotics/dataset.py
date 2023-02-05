@@ -14,7 +14,7 @@ image_width = 640
 
 class PoseDataset(data.Dataset):
     def __init__(self, mode, num, add_noise, root, noise_trans):
-        self.train_test_root = './train_test'
+        self.split_root = './split'
         self.model_root = './models'
 
         self.objlist = [
@@ -59,9 +59,11 @@ class PoseDataset(data.Dataset):
         item_count = 0
         for item in self.objlist:
             if self.mode == 'train':
-                input_file = open('{0}/{1}/train.txt'.format(self.train_test_root, item))
-            else:
-                input_file = open('{0}/{1}/test.txt'.format(self.train_test_root, item))
+                input_file = open(f'{self.split_root}/{item}/train.txt')
+            elif self.mode == 'test':
+                input_file = open(f'{self.split_root}/{item}/test.txt')
+            elif self.mode == 'eval':
+                input_file = open(f'{self.split_root}/{item}/eval.txt')
             while 1:
                 item_count += 1
                 input_line = input_file.readline()
@@ -69,16 +71,22 @@ class PoseDataset(data.Dataset):
                     break
                 if input_line[-1:] == '\n':
                     input_line = input_line[:-1]
-                image, instance = input_line.split('_')
 
-                self.list_image.append(f'{self.objdict[item]}/{image}')
                 self.list_obj.append(self.objlist.index(item))
                 self.list_rank.append(input_line)
-                self.list_meta.append(f'{self.objdict[item]}/{image}/{instance}')
-                self.list_mask.append(f'{self.objdict[item]}/{image}/{instance}/mask')
+
+                if self.mode == 'eval':
+                    self.list_image.append(input_line[:input_line.rfind('/')])
+                    self.list_meta.append(f'{input_line}')
+                    self.list_mask.append(f'{input_line}/mask')
+                else:
+                    image, instance = input_line.split('_')
+                    self.list_image.append(f'{self.objdict[item]}/{image}')
+                    self.list_meta.append(f'{self.objdict[item]}/{image}/{instance}')
+                    self.list_mask.append(f'{self.objdict[item]}/{image}/{instance}/mask')
 
             self.pt[item] = extract_model_pcd(f'{self.model_root}/{item}.master.ply')
-            
+
             with open(f'{self.model_root}/models_info.yml', 'r') as meta_file:
                 model_info = yaml.safe_load(meta_file)
                 self.diameters[self.objlist.index(item)] = model_info[self.objlist.index(item)]['diameter'] / self.cam_scale
@@ -121,10 +129,7 @@ class PoseDataset(data.Dataset):
 
         # mask for both valid depth and foreground
         mask_depth = ma.getmaskarray(ma.masked_not_equal(depth, 0))
-        if self.mode == 'eval':
-            mask_label = ma.getmaskarray(ma.masked_equal(label, True))
-        else:
-            mask_label = ma.getmaskarray(ma.masked_equal(label, True))
+        mask_label = ma.getmaskarray(ma.masked_equal(label, True))
         mask = mask_label * mask_depth
 
         if self.add_noise:

@@ -9,18 +9,35 @@ from lib.ransac_voting.ransac_voting_gpu import ransac_voting_layer
 from lib.transformations import quaternion_matrix
 from lib.knn.__init__ import KNearestNeighbor
 
+out_image_dir = './eval_images'
+os.makedirs(out_image_dir, exist_ok=True)
+
+self.part_list = [
+    'SF-CJd60-097-016-016',
+    'SF-CJd60-097-026',
+    'SongFeng_0005',
+    'SongFeng_306',
+    'SongFeng_311',
+    'SongFeng_318',
+    'SongFeng_332',
+    '21092302',
+    '6010018CSV',
+    '6010022CSV'
+]
+pcd_dir = './models'
+image_shape = (400, 640, 3)
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--gpu_id', type=str, default='0', help='GPU id')
 parser.add_argument('--model', type=str, default='results/robotics/pose_model_49_0.046507.pth',  help='Evaluation model')
-parser.add_argument('--dataset_root', type=str, default='data.hdf5d', help='dataset root dir')
+parser.add_argument('--dataset_root', type=str, default='data_real.hdf5d', help='dataset root dir')
 opt = parser.parse_args()
 
 num_objects = 10
 num_points = 500
 num_rotations = 60
 bs = 1
-output_result_dir = 'results/eval_robotics'
+output_result_dir = 'results_eval'
 if not os.path.exists(output_result_dir):
     os.makedirs(output_result_dir)
 knn = KNearestNeighbor(1)
@@ -43,6 +60,7 @@ fw = open('{0}/eval_result_logs.txt'.format(output_result_dir), 'w')
 
 error_data = 0
 for i, data in enumerate(test_dataloader, 0):
+    # add return instance_path, K, color in eval mode
     try:
         points, choose, img, target_t, target_r, model_points, idx, gt_t = data
     except:
@@ -96,3 +114,30 @@ fw.write('ALL success rate: {0}\n'.format(float(sum(success_count)) / sum(num_co
 fw.write('Accuracy: {0}\n'.format(accuracy / num_objects))
 fw.write('{0} corrupted data'.format(error_data))
 fw.close()
+
+def save_projections(part_idx, instance_path, pred_R, pred_t, K, color):
+    # color image, K, pred_R, pred_t, model_points, 
+    part_name = part_list[part_idx]
+    pcd_path = f'{pcd_dir}/{part_name}.master.ply'
+    pcd = o3d.io.read_point_cloud(pcd_path)
+    pcd = np.array(pcd.points)
+
+    points = np.matmul(pred_R, pcd.transpose()) + pred_t # transform model points
+    normalized_points = points / points[2]  # normalized plane
+    pixels = np.floor(np.matmul(K, normalized_points)[:2])  # project model points to image
+    pixels[[0,1]] = pixels[[1,0]]  # swap (x ,y) to (y, x)
+    keep = (pixels[0]>=0) & (pixels[0]<image_shape[0]) & (pixels[1]>=0) & (pixels[1]<image_shape[1])
+    pixels = pixels[:, keep]
+    pixels = pixels.unique()
+
+    red = np.zeros((1, pixels.shape[1]))
+    red_pixels = np.concatenate([pixels, red], axis=0)
+
+    flat_color = color.ravel()
+    flat_index_array = np.ravel_multi_index(red_pixels, image_shape)
+    flat_mask[flat_index_array] += 100
+    color = flat_mask.reshape(image_shape)
+
+    file_path = os.path.join(out_image_dir, instance_idx)
+    os.makedirs(file_path[:file_path.rfind('/')], exist_ok=True)
+    cv2.imwrite(file_path + '.png', color)

@@ -65,34 +65,26 @@ def ransac_voting_layer(cloud, pred_t, round_hyp_num=128, inlier_thresh=0.99, co
             cur_min_ratio = torch.min(all_win_ratio)
             if (1 - (1 - cur_min_ratio ** 2) ** hyp_num) > confidence or cur_iter > max_iter:
                 break
-        print('cur_iter', cur_iter)
-        print('all_win_ratio', all_win_ratio)
-        print('all_win_pts', all_win_pts)
         # compute mean intersection
         all_inlier = torch.zeros([1, vn, tn], dtype=torch.uint8, device=pred_t.device)
-        print('all_inlier', all_inlier)
         all_win_pts = torch.unsqueeze(all_win_pts, 0)   # [1, vn, 3]
-        print('all_win_pts', all_win_pts)
         ransac_voting_3d.voting_for_hypothesis(direct, coords, all_win_pts, all_inlier, inlier_thresh)
         all_inlier = all_inlier.view([tn, 1])   # because of vn = 1
-        print('all_inlier', all_inlier)
         all_inlier_count = torch.sum(all_inlier)
-        print('all_inlier_count', all_inlier_count)
         inlier_coords = coords.masked_select(all_inlier).view([all_inlier_count, 3, 1])
         # normalize directions
         inlier_direct = torch.squeeze(direct, 1)    # [tn, 3]
-        print('inlier_direct', inlier_direct)
         inlier_direct = inlier_direct / torch.norm(inlier_direct, dim=1, keepdim=True)
-        print('inlier_direct', inlier_direct)
         inlier_direct = inlier_direct.masked_select(all_inlier).view([all_inlier_count, 3, 1])  
-        print('inlier_direct', inlier_direct)
         S = torch.bmm(inlier_direct, inlier_direct.permute(0, 2, 1)) - \
                 torch.unsqueeze(torch.eye(3, device=pred_t.device), 0).repeat(all_inlier_count, 1, 1)
-        print('S', S)
         A = torch.sum(S, 0)    # [3, 3]
         b = torch.sum(torch.bmm(S, inlier_coords), 0)   # [3, 1]
         # voting result
-        win_pts = torch.matmul(torch.inverse(A), b).permute(1, 0)     # [1, 3]
+        if torch.all(A == 0):
+            win_pts = torch.zeros([1, 3], dtype=torch.float32, device=pred_t.device)
+        else:
+            win_pts = torch.matmul(torch.inverse(A), b).permute(1, 0)     # [1, 3]
         batch_win_pts.append(win_pts)
         # mask
         inliers = torch.squeeze(cur_mask, 1).repeat(vn, 1)   # [vn, pn]
