@@ -9,10 +9,10 @@ from lib.ransac_voting.ransac_voting_gpu import ransac_voting_layer
 from lib.transformations import quaternion_matrix
 from lib.knn.__init__ import KNearestNeighbor
 
-out_image_dir = './eval_images'
+out_image_dir = './eval_saved_images'
 os.makedirs(out_image_dir, exist_ok=True)
 
-self.part_list = [
+part_list = [
     'SF-CJd60-097-016-016',
     'SF-CJd60-097-026',
     'SongFeng_0005',
@@ -29,7 +29,7 @@ image_shape = (400, 640, 3)
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--gpu_id', type=str, default='0', help='GPU id')
-parser.add_argument('--model', type=str, default='results/robotics/pose_model_49_0.046507.pth',  help='Evaluation model')
+parser.add_argument('--model', type=str, default='results/pose_model_24_0.035654.pth',  help='Evaluation model')
 parser.add_argument('--dataset_root', type=str, default='data_real.hdf5d', help='dataset root dir')
 opt = parser.parse_args()
 
@@ -37,7 +37,7 @@ num_objects = 10
 num_points = 500
 num_rotations = 60
 bs = 1
-output_result_dir = 'results_eval'
+output_result_dir = 'eval_results'
 if not os.path.exists(output_result_dir):
     os.makedirs(output_result_dir)
 knn = KNearestNeighbor(1)
@@ -62,16 +62,15 @@ error_data = 0
 for i, data in enumerate(test_dataloader, 0):
     # add return instance_path, K, color in eval mode
     try:
-        points, choose, img, target_t, target_r, model_points, idx, gt_t = data
+        points, choose, img, target_r, model_points, idx, gt_t, instance_path, K, color = data
     except:
         error_data += 1
         print('No.{0} NOT Pass! Lost detection!'.format(i))
         fw.write('No.{0} NOT Pass! Lost detection!\n'.format(i))
         continue
-    points, choose, img, target_t, target_r, model_points, idx = Variable(points).cuda(), \
+    points, choose, img, target_r, model_points, idx = Variable(points).cuda(), \
                                                                  Variable(choose).cuda(), \
                                                                  Variable(img).cuda(), \
-                                                                 Variable(target_t).cuda(), \
                                                                  Variable(target_r).cuda(), \
                                                                  Variable(model_points).cuda(), \
                                                                  Variable(idx).cuda()
@@ -81,6 +80,7 @@ for i, data in enumerate(test_dataloader, 0):
     how_min, which_min = torch.min(pred_c, 1)
     pred_r = pred_r[0][which_min[0]].view(-1).cpu().data.numpy()
     pred_r = quaternion_matrix(pred_r)[:3, :3]
+    save_projections(idx[0].item(), instance_path, pred_r, pred_t, K, color)
     model_points = model_points[0].cpu().detach().numpy()
     pred = np.dot(model_points, pred_r.T) + pred_t
     target = target_r[0].cpu().detach().numpy() + gt_t.cpu().data.numpy()[0]
@@ -123,7 +123,7 @@ def save_projections(part_idx, instance_path, pred_R, pred_t, K, color):
     pcd = np.array(pcd.points)
 
     points = np.matmul(pred_R, pcd.transpose()) + pred_t # transform model points
-    normalized_points = points / points[2]  # normalized plane
+    normalized_points = points / points[2]  # to normalized plane
     pixels = np.floor(np.matmul(K, normalized_points)[:2])  # project model points to image
     pixels[[0,1]] = pixels[[1,0]]  # swap (x ,y) to (y, x)
     keep = (pixels[0]>=0) & (pixels[0]<image_shape[0]) & (pixels[1]>=0) & (pixels[1]<image_shape[1])
@@ -135,9 +135,9 @@ def save_projections(part_idx, instance_path, pred_R, pred_t, K, color):
 
     flat_color = color.ravel()
     flat_index_array = np.ravel_multi_index(red_pixels, image_shape)
-    flat_mask[flat_index_array] += 100
-    color = flat_mask.reshape(image_shape)
+    flat_color[flat_index_array] += 100
+    color = flat_color.reshape(image_shape)
 
-    file_path = os.path.join(out_image_dir, instance_idx)
+    file_path = os.path.join(out_image_dir, instance_path)
     os.makedirs(file_path[:file_path.rfind('/')], exist_ok=True)
     cv2.imwrite(file_path + '.png', color)

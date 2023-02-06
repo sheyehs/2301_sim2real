@@ -4,7 +4,7 @@ import h5py
 
 mode = 'eval'
 data_path = '../data_real.hdf5'
-out_path = '../split/'
+out_dir = '../split/'
 
 if mode == 'train':
     use_ratio = 0.025
@@ -18,7 +18,7 @@ h = h5py.File(data_path, 'r')
 for company_name in h:
     company = h[company_name]
     for part_name in company:
-        out_path = os.path.join(out_root, part_name)
+        out_path = os.path.join(out_dir, part_name)
         os.makedirs(out_path, exist_ok=True)
         part = company[part_name]
         for condition_name in part:

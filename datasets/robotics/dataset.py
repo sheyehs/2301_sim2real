@@ -112,8 +112,7 @@ class PoseDataset(data.Dataset):
 
     def __getitem__(self, index):
         obj = self.list_obj[index]  # 0, 1, 2 ...
-        rank = self.list_rank[index]  # image_instance
-        idx_image, idx_instance = rank.split('_')
+        instance_path = self.list_rank[index]  # image_instance
 
         h = h5py.File(self.root, 'r')
 
@@ -189,14 +188,29 @@ class PoseDataset(data.Dataset):
 
         h.close()
 
-        return torch.from_numpy(cloud.astype(np.float32)), \
-               torch.LongTensor(choose.astype(np.int32)), \
-               self.transform(img_masked), \
-               torch.from_numpy(target_t.astype(np.float32)), \
-               torch.from_numpy(target_r.astype(np.float32)), \
-               torch.from_numpy(model_points.astype(np.float32)), \
-               torch.LongTensor([obj]), \
-               torch.from_numpy(gt_t.astype(np.float32))
+        if mode in ['train', 'test']:
+            return torch.from_numpy(cloud.astype(np.float32)), \
+                torch.LongTensor(choose.astype(np.int32)), \
+                self.transform(img_masked), \
+                torch.from_numpy(target_t.astype(np.float32)), \
+                torch.from_numpy(target_r.astype(np.float32)), \
+                torch.from_numpy(model_points.astype(np.float32)), \
+                torch.LongTensor([obj]), \
+                torch.from_numpy(gt_t.astype(np.float32))
+        elif mode == 'eval':
+            return torch.from_numpy(cloud.astype(np.float32)), \
+                torch.LongTensor(choose.astype(np.int32)), \
+                self.transform(img_masked), \
+                torch.from_numpy(target_r.astype(np.float32)), \
+                torch.from_numpy(model_points.astype(np.float32)), \
+                torch.LongTensor([obj]), \
+                torch.from_numpy(gt_t.astype(np.float32)),
+                instance_path,
+                K,
+                np.array(img)
+
+
+
 
 
     def __len__(self):
