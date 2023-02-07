@@ -2,18 +2,21 @@ import os
 import random
 import h5py
 
-mode = 'train'
+mode = 'eval'
 data_path = '../data.hdf5'
 out_dir = '../split_new/'
 
-#################################################################
+"""
+train mode splits train and test data used in train.py
+eval mode chooses data for eval.py which visualizes the predicted position onto original image.  
+"""
 
 if mode == 'train':
     use_ratio = 0.025
     test_ratio = 0.1
     from sklearn.model_selection import train_test_split
 elif mode == 'eval':
-    pass
+    use_ratio = 0.0025
 
 h = h5py.File(data_path, 'r')
 
@@ -45,6 +48,9 @@ for company_name in h:
                 f.write('\n'.join(train))
 
         elif mode == 'eval':
+            n_use = int(use_ratio * len(instance_list))
+            print(f'use ratio is {use_ratio}, so choose {n_use} instances for eval from totally {len(instance_list)} images.')
+            instance_list = random.sample(instance_list, n_use)
             with open(os.path.join(out_path, 'eval.txt'), 'w') as f:
                 f.write('\n'.join(instance_list))
 

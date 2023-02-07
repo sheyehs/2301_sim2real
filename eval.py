@@ -12,7 +12,13 @@ import open3d as o3d
 from PIL import Image
 
 out_image_dir = './eval_saved_images'
+split_root = '/scratch/gc2720/2301_sim2real/split_new'
 os.makedirs(out_image_dir, exist_ok=True)
+parser = argparse.ArgumentParser()
+parser.add_argument('--gpu_id', type=str, default='0', help='GPU id')
+parser.add_argument('--model', type=str, default='/scratch/gc2720/2301_sim2real/results/lr_1e-4/pose_model_49_0.035039.pth',  help='Evaluation model')
+parser.add_argument('--dataset_root', type=str, default='data.hdf5', help='dataset root dir')
+opt = parser.parse_args()
 
 part_list = [
     'SF-CJd60-097-016-016',
@@ -28,12 +34,6 @@ part_list = [
 ]
 pcd_dir = './models'
 image_shape = (400, 640, 3)
-
-parser = argparse.ArgumentParser()
-parser.add_argument('--gpu_id', type=str, default='0', help='GPU id')
-parser.add_argument('--model', type=str, default='results/pose_model_24_0.035654.pth',  help='Evaluation model')
-parser.add_argument('--dataset_root', type=str, default='data_real.hdf5', help='dataset root dir')
-opt = parser.parse_args()
 
 num_objects = 10
 num_points = 500
@@ -83,7 +83,7 @@ def save_projections(part_idx, instance_path, pred_R, pred_t, K, color):
     image = Image.fromarray(color)
     image.save(file_path + '.png')
 
-test_dataset = PoseDataset('eval', num_points, False, opt.dataset_root, 0.0)
+test_dataset = PoseDataset('eval', num_points, False, opt.dataset_root, 0.0, split_root)
 test_dataloader = torch.utils.data.DataLoader(test_dataset, batch_size=1, shuffle=False, num_workers=10)
 sym_list = test_dataset.get_sym_list()
 rot_anchors = torch.from_numpy(estimator.rot_anchors).float().cuda()

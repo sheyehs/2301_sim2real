@@ -13,8 +13,8 @@ image_height = 400
 image_width = 640
 
 class PoseDataset(data.Dataset):
-    def __init__(self, mode, num, add_noise, root, noise_trans):
-        self.split_root = './split'
+    def __init__(self, mode, num, add_noise, root, noise_trans, split_root):
+        self.split_root = split_root
         self.model_root = './models'
 
         self.objlist = [
