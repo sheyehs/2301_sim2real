@@ -23,7 +23,7 @@ parser.add_argument('--num_rot', type=int, default=60, help='number of rotation 
 parser.add_argument('--batch_size', type=int, default=8, help='batch size')
 parser.add_argument('--workers', type=int, default=10, help='number of data loading workers')
 parser.add_argument('--noise_trans', default=0.01, help='random noise added to translation')
-parser.add_argument('--lr', default=0.0001, help='learning rate')
+parser.add_argument('--lr', type=float, default=0.0001, help='learning rate')
 parser.add_argument('--start_epoch', type=int, default=1, help='which epoch to start')
 parser.add_argument('--resume_posenet', type=str, default='', help='resume PoseNet model')
 parser.add_argument('--nepoch', type=int, default=50, help='max number of epochs to train')
@@ -50,7 +50,7 @@ def main():
         opt.dataset_root = './data.hdf5'
         opt.num_objects = 10 
         opt.num_points = 500
-        opt.result_dir = 'results/'
+        opt.result_dir = f'results/lr_{opt.lr}'
         opt.repeat_epoch = 10
     else:
         print('unknown dataset')

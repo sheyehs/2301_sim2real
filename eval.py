@@ -8,6 +8,8 @@ from lib.network import PoseNet
 from lib.ransac_voting.ransac_voting_gpu import ransac_voting_layer
 from lib.transformations import quaternion_matrix
 from lib.knn.__init__ import KNearestNeighbor
+import open3d as o3d
+from PIL import Image
 
 out_image_dir = './eval_saved_images'
 os.makedirs(out_image_dir, exist_ok=True)
@@ -30,7 +32,7 @@ image_shape = (400, 640, 3)
 parser = argparse.ArgumentParser()
 parser.add_argument('--gpu_id', type=str, default='0', help='GPU id')
 parser.add_argument('--model', type=str, default='results/pose_model_24_0.035654.pth',  help='Evaluation model')
-parser.add_argument('--dataset_root', type=str, default='data_real.hdf5d', help='dataset root dir')
+parser.add_argument('--dataset_root', type=str, default='data_real.hdf5', help='dataset root dir')
 opt = parser.parse_args()
 
 num_objects = 10
@@ -48,6 +50,39 @@ estimator.cuda()
 estimator.load_state_dict(torch.load(opt.model))
 estimator.eval()
 
+def save_projections(part_idx, instance_path, pred_R, pred_t, K, color):
+    K = K[0].numpy()
+    instance_path = instance_path[0].lstrip('/')
+    color = color.numpy()[0]
+    if color.shape != image_shape:
+        print(instance_path)
+
+    part_name = part_list[part_idx]
+    pcd_path = f'{pcd_dir}/{part_name}.master.ply'
+    pcd = o3d.io.read_point_cloud(pcd_path)
+    pcd = np.array(pcd.points)
+
+    points = np.matmul(pred_R, pcd.transpose()) + pred_t.transpose() # transform model points
+    normalized_points = points / points[2]  # to normalized plane
+    pixels = np.floor(np.matmul(K, normalized_points)[:2]).astype(int)  # project model points to image
+    pixels[[0,1]] = pixels[[1,0]]  # swap (x ,y) to (y, x)
+    keep = (pixels[0]>=0) & (pixels[0]<image_shape[0]) & (pixels[1]>=0) & (pixels[1]<image_shape[1])
+    pixels = pixels[:, keep]
+    pixels = np.unique(pixels, axis=1)
+
+    red = np.zeros((1, pixels.shape[1]), dtype=int)
+    red_pixels = np.concatenate([pixels, red], axis=0)
+
+    flat_color = color.ravel()
+    flat_index_array = np.ravel_multi_index(red_pixels, image_shape)
+    flat_color[flat_index_array] = 255
+    color = flat_color.reshape(image_shape)
+
+    file_path = os.path.join(out_image_dir, instance_path)
+    os.makedirs(file_path[:file_path.rfind('/')], exist_ok=True)
+    image = Image.fromarray(color)
+    image.save(file_path + '.png')
+
 test_dataset = PoseDataset('eval', num_points, False, opt.dataset_root, 0.0)
 test_dataloader = torch.utils.data.DataLoader(test_dataset, batch_size=1, shuffle=False, num_workers=10)
 sym_list = test_dataset.get_sym_list()
@@ -61,13 +96,7 @@ fw = open('{0}/eval_result_logs.txt'.format(output_result_dir), 'w')
 error_data = 0
 for i, data in enumerate(test_dataloader, 0):
     # add return instance_path, K, color in eval mode
-    try:
-        points, choose, img, target_r, model_points, idx, gt_t, instance_path, K, color = data
-    except:
-        error_data += 1
-        print('No.{0} NOT Pass! Lost detection!'.format(i))
-        fw.write('No.{0} NOT Pass! Lost detection!\n'.format(i))
-        continue
+    points, choose, img, target_r, model_points, idx, gt_t, instance_path, K, color = data
     points, choose, img, target_r, model_points, idx = Variable(points).cuda(), \
                                                                  Variable(choose).cuda(), \
                                                                  Variable(img).cuda(), \
@@ -99,15 +128,15 @@ for i, data in enumerate(test_dataloader, 0):
         print('No.{0} Pass! Distance: {1}'.format(i, dis))
         fw.write('No.{0} Pass! Distance: {1}\n'.format(i, dis))
     else:
-        print('No.{0} NOT Pass! Distance: {1}'.format(i, dis))
+        # print('No.{0} NOT Pass! Distance: {1}'.format(i, dis))
         fw.write('No.{0} NOT Pass! Distance: {1}\n'.format(i, dis))
     num_count[idx[0].item()] += 1
 
 accuracy = 0.0
 for i in range(num_objects):
     accuracy += float(success_count[i]) / num_count[i]
-    print('Object {0} success rate: {1}'.format(objlist[i], float(success_count[i]) / num_count[i]))
-    fw.write('Object {0} success rate: {1}\n'.format(objlist[i], float(success_count[i]) / num_count[i]))
+    print('Object {0} success rate: {1}'.format(part_list[i], float(success_count[i]) / num_count[i]))
+    fw.write('Object {0} success rate: {1}\n'.format(part_list[i], float(success_count[i]) / num_count[i]))
 print('ALL success rate: {0}'.format(float(sum(success_count)) / sum(num_count)))
 print('Accuracy: {0}'.format(accuracy / num_objects))
 fw.write('ALL success rate: {0}\n'.format(float(sum(success_count)) / sum(num_count)))
@@ -115,29 +144,4 @@ fw.write('Accuracy: {0}\n'.format(accuracy / num_objects))
 fw.write('{0} corrupted data'.format(error_data))
 fw.close()
 
-def save_projections(part_idx, instance_path, pred_R, pred_t, K, color):
-    # color image, K, pred_R, pred_t, model_points, 
-    part_name = part_list[part_idx]
-    pcd_path = f'{pcd_dir}/{part_name}.master.ply'
-    pcd = o3d.io.read_point_cloud(pcd_path)
-    pcd = np.array(pcd.points)
 
-    points = np.matmul(pred_R, pcd.transpose()) + pred_t # transform model points
-    normalized_points = points / points[2]  # to normalized plane
-    pixels = np.floor(np.matmul(K, normalized_points)[:2])  # project model points to image
-    pixels[[0,1]] = pixels[[1,0]]  # swap (x ,y) to (y, x)
-    keep = (pixels[0]>=0) & (pixels[0]<image_shape[0]) & (pixels[1]>=0) & (pixels[1]<image_shape[1])
-    pixels = pixels[:, keep]
-    pixels = pixels.unique()
-
-    red = np.zeros((1, pixels.shape[1]))
-    red_pixels = np.concatenate([pixels, red], axis=0)
-
-    flat_color = color.ravel()
-    flat_index_array = np.ravel_multi_index(red_pixels, image_shape)
-    flat_color[flat_index_array] += 100
-    color = flat_color.reshape(image_shape)
-
-    file_path = os.path.join(out_image_dir, instance_path)
-    os.makedirs(file_path[:file_path.rfind('/')], exist_ok=True)
-    cv2.imwrite(file_path + '.png', color)

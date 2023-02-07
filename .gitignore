@@ -4,7 +4,10 @@ envs/*.ext3
 *.hdf5
 results/
 eval_results/
+eval_saved_images/
 sbatch/*.out
+
+virtual_models/
 
 lib/__pycache__/
 lib/knn/__pycache__/

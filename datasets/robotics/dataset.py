@@ -188,7 +188,7 @@ class PoseDataset(data.Dataset):
 
         h.close()
 
-        if mode in ['train', 'test']:
+        if self.mode in ['train', 'test']:
             return torch.from_numpy(cloud.astype(np.float32)), \
                 torch.LongTensor(choose.astype(np.int32)), \
                 self.transform(img_masked), \
@@ -197,21 +197,17 @@ class PoseDataset(data.Dataset):
                 torch.from_numpy(model_points.astype(np.float32)), \
                 torch.LongTensor([obj]), \
                 torch.from_numpy(gt_t.astype(np.float32))
-        elif mode == 'eval':
+        elif self.mode == 'eval':
             return torch.from_numpy(cloud.astype(np.float32)), \
                 torch.LongTensor(choose.astype(np.int32)), \
                 self.transform(img_masked), \
                 torch.from_numpy(target_r.astype(np.float32)), \
                 torch.from_numpy(model_points.astype(np.float32)), \
                 torch.LongTensor([obj]), \
-                torch.from_numpy(gt_t.astype(np.float32)),
-                instance_path,
-                K,
+                torch.from_numpy(gt_t.astype(np.float32)), \
+                instance_path, \
+                K, \
                 np.array(img)
-
-
-
-
 
     def __len__(self):
         return self.length
