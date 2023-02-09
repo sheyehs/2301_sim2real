@@ -10,14 +10,19 @@ from lib.transformations import quaternion_matrix
 from lib.knn.__init__ import KNearestNeighbor
 import open3d as o3d
 from PIL import Image
+import time
 
-out_image_dir = './eval_saved_images'
-split_root = '/scratch/gc2720/2301_sim2real/split_new'
+date = time.strftime("%m%d")
+out_image_dir = f'./eval_saved_images/{date}'
 os.makedirs(out_image_dir, exist_ok=True)
+output_result_dir = f'./eval_results/{date}'
+os.makedirs(output_result_dir, exist_ok=True)
+split_root = '/scratch/gc2720/2301_sim2real/split'
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--gpu_id', type=str, default='0', help='GPU id')
 parser.add_argument('--model', type=str, default='/scratch/gc2720/2301_sim2real/results/lr_1e-4/pose_model_49_0.035039.pth',  help='Evaluation model')
-parser.add_argument('--dataset_root', type=str, default='data.hdf5', help='dataset root dir')
+parser.add_argument('--dataset_root', type=str, default='data_real.hdf5', help='dataset root dir')
 opt = parser.parse_args()
 
 part_list = [
@@ -39,9 +44,6 @@ num_objects = 10
 num_points = 500
 num_rotations = 60
 bs = 1
-output_result_dir = 'eval_results'
-if not os.path.exists(output_result_dir):
-    os.makedirs(output_result_dir)
 knn = KNearestNeighbor(1)
 
 os.environ['CUDA_VISIBLE_DEVICES'] = opt.gpu_id
@@ -50,7 +52,7 @@ estimator.cuda()
 estimator.load_state_dict(torch.load(opt.model))
 estimator.eval()
 
-def save_projections(part_idx, instance_path, pred_R, pred_t, K, color):
+def save_projections(part_idx, instance_path, pred_R, pred_t, K, color, target):
     K = K[0].numpy()
     instance_path = instance_path[0].lstrip('/')
     color = color.numpy()[0]
@@ -109,10 +111,10 @@ for i, data in enumerate(test_dataloader, 0):
     how_min, which_min = torch.min(pred_c, 1)
     pred_r = pred_r[0][which_min[0]].view(-1).cpu().data.numpy()
     pred_r = quaternion_matrix(pred_r)[:3, :3]
-    save_projections(idx[0].item(), instance_path, pred_r, pred_t, K, color)
     model_points = model_points[0].cpu().detach().numpy()
     pred = np.dot(model_points, pred_r.T) + pred_t
     target = target_r[0].cpu().detach().numpy() + gt_t.cpu().data.numpy()[0]
+    save_projections(idx[0].item(), instance_path, pred_r, pred_t * 1000, K, color, target * 1000)
 
     if idx[0].item() in sym_list:
         pred = torch.from_numpy(pred.astype(np.float32)).cuda().transpose(1, 0).contiguous()

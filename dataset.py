@@ -14,6 +14,7 @@ image_width = 640
 
 class PoseDataset(data.Dataset):
     def __init__(self, mode, num, add_noise, root, noise_trans, split_root):
+        self.root = root
         self.split_root = split_root
         self.model_root = './models'
 
@@ -30,30 +31,14 @@ class PoseDataset(data.Dataset):
             '6010022CSV'
         ]
 
-        self.objdict = {
-            'SF-CJd60-097-016-016': 'SongFeng/SF-CJd60-097-016-016/2022-10-06-rvbust_synthetic',
-            'SF-CJd60-097-026': 'SongFeng/SF-CJd60-097-026/2022-10-05-rvbust_synthetic',
-            'SongFeng_0005': 'SongFeng/SongFeng_0005/2022-10-05-rvbust_synthetic',
-            'SongFeng_306': 'SongFeng/SongFeng_306/2022-05-08-rvbust_synthetic',
-            'SongFeng_311': 'SongFeng/SongFeng_311/2022-05-11-rvbust_synthetic',
-            'SongFeng_318': 'SongFeng/SongFeng_318/2022-05-17-rvbust_synthetic',
-            'SongFeng_332': 'SongFeng/SongFeng_332/2022-04-28-rvbust_synthetic',
-            '21092302': 'Toyota/21092302/2022-10-03-rvbust_synthetic',
-            '6010018CSV': 'ZSRobot/6010018CSV/2022-10-04-rvbust_synthetic',
-            '6010022CSV': 'ZSRobot/6010022CSV/2022-05-19-rvbust_synthetic'
-        }
-
         self.mode = mode
         self.cam_scale = 1000.0
-        self.depth_scale = 22.0
+        self.depth_scale = 22.0  # to change
 
         self.list_image = []
-        self.list_mask = []
         self.list_obj = []  # part index
         self.list_rank = []  # instance number
-        self.list_meta = []  #
         self.pt = {}
-        self.root = root
         self.diameters = {}
 
         item_count = 0
@@ -74,22 +59,22 @@ class PoseDataset(data.Dataset):
 
                 self.list_obj.append(self.objlist.index(item))
                 self.list_rank.append(input_line)
+                self.list_image.append(input_line[:input_line.rfind('/')])
 
-                if self.mode == 'eval':
-                    self.list_image.append(input_line[:input_line.rfind('/')])
-                    self.list_meta.append(f'{input_line}')
-                    self.list_mask.append(f'{input_line}/mask')
-                else:
-                    image, instance = input_line.split('_')
-                    self.list_image.append(f'{self.objdict[item]}/{image}')
-                    self.list_meta.append(f'{self.objdict[item]}/{image}/{instance}')
-                    self.list_mask.append(f'{self.objdict[item]}/{image}/{instance}/mask')
+            # read pcd
+            model_path = f'{self.model_root}/{item}.master.ply'
+            print('extract model point cloud from:', model_path)
+            pcd = o3d.io.read_point_cloud(model_path)
+            pcd = np.array(pcd.points)
+            print('point cloud shape:', pcd.shape)
+            self.pt[item] = pcd
 
-            self.pt[item] = extract_model_pcd(f'{self.model_root}/{item}.master.ply')
-
-            with open(f'{self.model_root}/models_info.yml', 'r') as meta_file:
+            # read diameter
+            with open(f'{self.model_root}/diameters.yml', 'r') as meta_file:
                 model_info = yaml.safe_load(meta_file)
-                self.diameters[self.objlist.index(item)] = model_info[self.objlist.index(item)]['diameter'] / self.cam_scale
+                diameter = float(model_info[item]) / self.cam_scale
+                print(f'read {item} diameter {diameter} m.')
+                self.diameters[self.objlist.index(item)] = diameter
 
             print('Object {0} buffer loaded'.format(item))
 
@@ -98,9 +83,9 @@ class PoseDataset(data.Dataset):
         self.xmap = np.array([[i for i in range(image_width)] for j in range(image_height)])
         self.ymap = np.array([[j for i in range(image_width)] for j in range(image_height)])
         
-        self.num = num  # number of points for t
+        self.num = num  # number of points for predicting t
+        self.num_pt_mesh = 500  # number of points for evaluating R
         self.symmetry_obj_idx = []
-        self.num_pt_mesh = 500  # number of points for R
 
         self.add_noise = add_noise
         self.trancolor = transforms.ColorJitter(0.2, 0.2, 0.2, 0.05)
@@ -118,7 +103,7 @@ class PoseDataset(data.Dataset):
 
         img = Image.fromarray(np.array(h[f'{self.list_image[index]}/color']))  
         depth = np.array(h[f'{self.list_image[index]}/depth'])
-        label = np.array(h[self.list_mask[index]])
+        label = np.array(h[f'{self.list_rank[index]}/mask'])
           
         K = np.array(h[f'{self.list_image[index]}/K'])
         cam_fx = K[0][0]
@@ -135,14 +120,14 @@ class PoseDataset(data.Dataset):
             img = self.trancolor(img)
         img_masked = np.array(img)
 
-        meta = h[self.list_meta[index]]
+        meta = h[self.list_rank[index]]
         rmin, rmax, cmin, cmax = get_bbox(meta)  # choose predifined box size 
         img_masked = img_masked[rmin:rmax, cmin:cmax, :3]
         
         target_r = np.resize(np.array(meta['R']), (3, 3))
         target_t = np.array(meta['t']) / self.cam_scale
 
-        choose = mask[rmin:rmax, cmin:cmax].flatten().nonzero()[0]  # index in the box
+        choose = mask[rmin:rmax, cmin:cmax].flatten().nonzero()[0]  # valid index in the box
         # return all zero vector if there is no valid point
         if len(choose) == 0:
             cc = torch.LongTensor([0])
@@ -162,11 +147,11 @@ class PoseDataset(data.Dataset):
         ymap_masked = self.ymap[rmin:rmax, cmin:cmax].flatten()[choose][:, np.newaxis].astype(np.float32)
         choose = np.array([choose])
 
-        # point cloud
+        # point cloud from depth 
         pt2 = depth_masked / self.cam_scale / self.depth_scale
         pt0 = (xmap_masked - cam_cx) * pt2 / cam_fx
         pt1 = (ymap_masked - cam_cy) * pt2 / cam_fy
-        cloud = np.concatenate((pt0, pt1, pt2), axis=1)
+        cloud = np.concatenate((pt0, pt1, pt2), axis=1)  # (n_points, 3)
         if self.add_noise:
             # shift
             add_t = np.random.uniform(-self.noise_trans, self.noise_trans, (1, 3))
@@ -176,8 +161,8 @@ class PoseDataset(data.Dataset):
             cloud = np.add(cloud, add_t)
         # position target
         gt_t = target_t
-        target_t = target_t - cloud
-        target_t = target_t / np.linalg.norm(target_t, axis=1)[:, None]
+        target_t = target_t - cloud  # relative vectors from depth point to target center 
+        target_t = target_t / np.linalg.norm(target_t, axis=1)[:, None]  # normalize
 
         # rotation target
         model_points = self.pt[self.objlist[obj]] / self.cam_scale
@@ -247,6 +232,7 @@ def get_bbox(meta):
             c_b = border_list[tt + 1]
             break
     center = [int((rmin + rmax) / 2), int((cmin + cmax) / 2)]
+    # new boundary [a, b)
     rmin = center[0] - int(r_b / 2)
     rmax = center[0] + int(r_b / 2)
     cmin = center[1] - int(c_b / 2)
@@ -270,11 +256,4 @@ def get_bbox(meta):
     return rmin, rmax, cmin, cmax
 
 
-def extract_model_pcd(model_path):
-    print('extract model point cloud from:', model_path)
-    pcd = o3d.io.read_point_cloud(model_path)
-    pcd = np.array(pcd.points)
-    print('point cloud shape:', pcd.shape)
-    # ones = np.ones((pcd.shape[0], 1))
-    # pcd_one = np.concatenate([pcd, ones], axis=1)
-    return pcd
+

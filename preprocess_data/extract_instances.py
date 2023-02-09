@@ -9,20 +9,14 @@ from functools import partial
 import h5py
 
 data_type = 'real'
+output_name = 'data_real_new'
 
-if data_type == 'synthetic':
-    output_name = 'data'
-elif data_type == 'real':
-    output_name = 'data_real'
-else:
-    print('Invalid data type.')
-    exit()
-
+#####################################################
 
 data_dir = '/scratch/gc2720/2301_sim2real/2022-11-15'
 hdf5_path = f'/scratch/gc2720/2301_sim2real/{output_name}.hdf5'
 company_list = ["SongFeng", "Toyota","ZSRobot"]
-downsample_factor = 3  # (1200, 1920) -> (400, 640)
+downsample_shape = np.array([400, 640], dtype=int)
 
 def extract_pcd(part_dir):
     part_name = part_dir.split('/')[-1]
@@ -46,12 +40,16 @@ def filter_nearest_pixels(pixels):
 
 
 def extract_instances_from_one_image(image_name, condition_dir, condition_grp, pcd_one):
-    condition_grp = h.require_group(condition_grp)
+    # condition_grp = h.require_group(condition_grp)
     image_grp = condition_grp.require_group(image_name)
     depth_path = os.path.join(condition_dir, 'depth', f'{image_name}.png')  # keep same
     color_path = os.path.join(condition_dir, 'images', f'{image_name}.jpg')  # keep same
     param_path = os.path.join(condition_dir, 'images', f'{image_name}.json')
     label_path = os.path.join(condition_dir, 'labels', f'{image_name}.npy')
+
+    # read images
+    depth = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
+    color = cv2.imread(color_path, cv2.IMREAD_COLOR)
     
     # read json
     with open(param_path) as f:
@@ -59,19 +57,36 @@ def extract_instances_from_one_image(image_name, condition_dir, condition_grp, p
     image_shape = np.array([params['height'], params['width']], dtype=int)
     K = np.array(params['K']).reshape((3,3))
     # downsample shape and K
-    image_shape = (image_shape / downsample_factor).astype(int)
-    K /= downsample_factor
+    if np.all(image_shape == np.array([1200, 1920], dtype=int)):
+        K /= 3
+    elif image_shape[0] * 8 == image_shape[1] * 5:
+        K /= (image_shape[0].astype(float) / downsample_shape[0].astype(float)) 
+    elif image_shape[0] * 8 > image_shape[1] * 5:
+        crop_height = image_shape[1].astype(float) * 5 / 8
+        crop_height_start = np.ceil((image_shape[0].astype(float) - crop_height) / 2).astype(int)
+        crop_height_end = np.floor((image_shape[0].astype(float) + crop_height) / 2).astype(int)
+        depth = depth[crop_height_start:crop_height_end]
+        color = color[crop_height_start:crop_height_end]
+        K[1][2] = K[1][2] - crop_height_start
+        K /= (image_shape[1].astype(float) / downsample_shape[1].astype(float))        
+    else:  # image_shape[0] * 8 < image_shape[1] * 5
+        crop_width = image_shape[0].astype(float) * 8 / 5
+        crop_width_start = np.ceil((image_shape[1].astype(float) - crop_width) / 2).astype(int)
+        crop_wdith_end = np.floor((image_shape[1].astype(float) + crop_width) / 2).astype(int)
+        depth = depth[:, crop_width_start:crop_width_end]
+        color = color[:, crop_width_start:crop_width_end]
+        K[0][2] = K[0][2] - crop_width_start
+        K /= (image_shape[0].astype(float) / downsample_shape[0].astype(float)) 
+        
+
     # save shape and K
-    image_grp.create_dataset('height', data=image_shape[0])
-    image_grp.create_dataset('width', data=image_shape[1])
+    image_grp.create_dataset('height', data=downsample_shape[0])
+    image_grp.create_dataset('width', data=downsample_shape[1])
     image_grp.create_dataset('K', data=K)
 
-    # read images
-    depth = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
-    color = cv2.imread(color_path, cv2.IMREAD_COLOR)
     # downsample
-    depth = cv2.resize(depth, (image_shape[1], image_shape[0]))  # first width, then height
-    color = cv2.resize(color, (image_shape[1], image_shape[0]))
+    depth = cv2.resize(depth, (downsample_shape[1], downsample_shape[0]))  # first width, then height
+    color = cv2.resize(color, (downsample_shape[1], downsample_shape[0]))
     # save images
     image_grp.create_dataset('depth', data=depth)
     image_grp.create_dataset('color', data=color)
@@ -148,6 +163,6 @@ if __name__ == '__main__':
                 image_list.sort()
                 
                 for image_name in tqdm(image_list):
-                    extract_instances_from_one_image(image_name, condition_dir, condition_grp.name, pcd_one)
+                    extract_instances_from_one_image(image_name, condition_dir, condition_grp, pcd_one)
 
     h.close()

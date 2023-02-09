@@ -6,9 +6,7 @@ import numpy as np
 import torch
 from torch.autograd import Variable
 from torch.utils.tensorboard import SummaryWriter
-from datasets.ycb.dataset import PoseDataset as PoseDataset_ycb
-from datasets.linemod.dataset import PoseDataset as PoseDataset_linemod
-from datasets.robotics.dataset import PoseDataset as PoseDataset_robotics
+from dataset import PoseDataset 
 from lib.network import PoseNet
 from lib.loss import Loss
 from lib.ransac_voting.ransac_voting_gpu import ransac_voting_layer
@@ -18,6 +16,7 @@ from lib.utils import setup_logger
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', type=str, default='robotics')
+parser.add_argument('--split_dir', type=str, default='./split')
 parser.add_argument('--gpu_id', type=str, default='0', help='GPU id')
 parser.add_argument('--num_rot', type=int, default=60, help='number of rotation anchors')
 parser.add_argument('--batch_size', type=int, default=8, help='batch size')
@@ -26,7 +25,7 @@ parser.add_argument('--noise_trans', default=0.01, help='random noise added to t
 parser.add_argument('--lr', type=float, default=0.0001, help='learning rate')
 parser.add_argument('--start_epoch', type=int, default=1, help='which epoch to start')
 parser.add_argument('--resume_posenet', type=str, default='', help='resume PoseNet model')
-parser.add_argument('--nepoch', type=int, default=50, help='max number of epochs to train')
+parser.add_argument('--nepoch', type=int, default=100, help='max number of epochs to train')
 opt = parser.parse_args()
 
 
@@ -34,36 +33,18 @@ def main():
     opt.manualSeed = random.randint(1, 10000)
     random.seed(opt.manualSeed)
     torch.manual_seed(opt.manualSeed)
-    if opt.dataset == 'ycb':
-        opt.dataset_root = 'datasets/ycb/YCB_Video_Dataset'
-        opt.num_objects = 21
-        opt.num_points = 1000
-        opt.result_dir = 'results/ycb'
-        opt.repeat_epoch = 1
-    elif opt.dataset == 'linemod':
-        opt.dataset_root = 'datasets/linemod/Linemod_preprocessed'
-        opt.num_objects = 13
-        opt.num_points = 500
-        opt.result_dir = 'results/linemod'
-        opt.repeat_epoch = 10
-    elif opt.dataset == 'robotics':
+    if opt.dataset == 'robotics':
         opt.dataset_root = './data.hdf5'
         opt.num_objects = 10 
         opt.num_points = 500
-        opt.result_dir = f'results/lr_{opt.lr}'
-        opt.repeat_epoch = 10
+        opt.result_dir = f'results/{time.strftime("%m%d")}_lr_{opt.lr}'
+        opt.repeat_epoch = 1  # 10
     else:
         print('unknown dataset')
         return
-    if opt.dataset == 'ycb':
-        dataset = PoseDataset_ycb('train', opt.num_points, True, opt.dataset_root, opt.noise_trans)
-        test_dataset = PoseDataset_ycb('test', opt.num_points, False, opt.dataset_root, 0.0)
-    elif opt.dataset == 'linemod':
-        dataset = PoseDataset_linemod('train', opt.num_points, True, opt.dataset_root, opt.noise_trans)
-        test_dataset = PoseDataset_linemod('test', opt.num_points, False, opt.dataset_root, 0.0)
-    elif opt.dataset == 'robotics':
-        dataset = PoseDataset_robotics('train', opt.num_points, True, opt.dataset_root, opt.noise_trans)
-        test_dataset = PoseDataset_robotics('test', opt.num_points, False, opt.dataset_root, 0.0)
+    if opt.dataset == 'robotics':
+        dataset = PoseDataset('train', opt.num_points, True, opt.dataset_root, opt.noise_trans, opt.split_dir)
+        test_dataset = PoseDataset('test', opt.num_points, False, opt.dataset_root, 0.0, opt.split_dir)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=True, num_workers=opt.workers)
     testdataloader = torch.utils.data.DataLoader(test_dataset, batch_size=1, shuffle=False, num_workers=opt.workers)
     opt.sym_list = dataset.get_sym_list()
@@ -227,9 +208,6 @@ def main():
                         },
                         global_step
                     )
-            # with tb_writer.as_default():
-            #     tf.summary.scalar('accuracy', accuracy, global_step)
-            #     tf.summary.scalar('test_dis', test_dis, global_step)
         # save model
         if test_dis < best_test:
             best_test = test_dis

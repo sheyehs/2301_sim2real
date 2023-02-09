@@ -6,6 +6,7 @@ results/
 eval_results/
 eval_saved_images/
 sbatch/*.out
+__pycache__
 
 virtual_models/
 
