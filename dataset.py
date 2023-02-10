@@ -206,6 +206,9 @@ class PoseDataset(data.Dataset):
     def get_diameter(self):
         return self.diameters
 
+    def get_part_list(self):
+        return sefl.objlist
+
 
 def get_bbox(meta):
     border_list = [-1, 40, 80, 120, 160, 200, 240, 280, 320, 360, 400, 440, 480, 520, 560, 600, 640, 680]

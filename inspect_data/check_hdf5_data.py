@@ -3,13 +3,26 @@ import os
 from matplotlib import pyplot as plt
 import numpy as np
 
-company = 'ZSRobot'
-part = '6010022CSV'
-condition = '2022-05-19-rvbust_synthetic'
-image = '002453'
-instance = '10'
-hdf5_path = '/scratch/gc2720/2301_sim2real/data.hdf5'
+hdf5_path = '/scratch/gc2720/2301_sim2real/data_real_new.hdf5'
 
+if 0:
+    company = 'ZSRobot'
+    part = '6010022CSV'
+    condition = '2022-02-09-photoneo_bright_lighting_lux3000'
+    image = '000044'
+    instance = '10'
+if 0:
+    company = 'Toyota'
+    part = '21092302'
+    condition = '2022-04-18-rvbust_normal_lighting_lux200'
+    image = '000021'
+    instance = '02'
+if 1:
+    company = 'SongFeng'
+    part = 'SongFeng_306'
+    condition = '2022-04-21-rvbust_bright_lighting_lux1200'
+    image = '000014'
+    instance = '05'
 """
 data.hdf5 hierarchy
 company | part  | condition | image | height

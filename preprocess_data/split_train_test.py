@@ -2,21 +2,35 @@ import os
 import random
 import h5py
 
-mode = 'eval'
-data_path = '../data.hdf5'
-out_dir = '../split_new/'
+i_mode = 2
+out_dir = '../split'
+
+#############################################
+
+mode_list = [
+    'train_test',
+    'eval',
+    'eval_on_real'
+]
+
+mode = mode_list[i_mode]
 
 """
 train mode splits train and test data used in train.py
 eval mode chooses data for eval.py which visualizes the predicted position onto original image.  
 """
 
-if mode == 'train':
+if mode == 'train_test':
     use_ratio = 0.025
     test_ratio = 0.1
+    data_path = '../data.hdf5'
     from sklearn.model_selection import train_test_split
 elif mode == 'eval':
     use_ratio = 0.0025
+    data_path = '../data.hdf5'
+elif mode == 'eval_on_real':
+    use_ratio = 0.0025
+    data_path = '../data_real_new.hdf5'
 
 h = h5py.File(data_path, 'r')
 
@@ -38,7 +52,7 @@ for company_name in h:
                     instance_list.append(full_name)
 
         # for each kind of part
-        if mode == 'train':
+        if mode.startswith('train_test'):
             n_use = int(use_ratio * len(instance_list))
             instances = random.sample(instance_list, n_use)
             train, test = train_test_split(instances, test_size=test_ratio)
@@ -47,11 +61,11 @@ for company_name in h:
             with open(os.path.join(out_path, 'train.txt'), 'w') as f:
                 f.write('\n'.join(train))
 
-        elif mode == 'eval':
+        elif mode.startswith('eval'):
             n_use = int(use_ratio * len(instance_list))
             print(f'use ratio is {use_ratio}, so choose {n_use} instances for eval from totally {len(instance_list)} images.')
             instance_list = random.sample(instance_list, n_use)
-            with open(os.path.join(out_path, 'eval.txt'), 'w') as f:
+            with open(os.path.join(out_path, f'{mode}.txt'), 'w') as f:
                 f.write('\n'.join(instance_list))
 
 h.close()

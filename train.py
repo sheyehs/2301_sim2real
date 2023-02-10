@@ -38,7 +38,7 @@ def main():
         opt.num_objects = 10 
         opt.num_points = 500
         opt.result_dir = f'results/{time.strftime("%m%d")}_lr_{opt.lr}'
-        opt.repeat_epoch = 1  # 10
+        opt.repeat_epoch = 2  # 10
     else:
         print('unknown dataset')
         return
@@ -213,11 +213,11 @@ def main():
             best_test = test_dis
         torch.save(estimator.state_dict(), '{0}/pose_model_{1:02d}_{2:06f}.pth'.format(opt.result_dir, epoch, best_test))
         # adjust learning rate if necessary
-        if best_test < 0.016 and not opt.first_decay_start:
+        if best_test < 0.04 and not opt.first_decay_start:  # 0.016
             opt.first_decay_start = True
-            opt.lr *= 0.6
+            opt.lr *= 0.5
             optimizer = torch.optim.Adam(estimator.parameters(), lr=opt.lr)
-        if best_test < 0.013 and not opt.second_decay_start:
+        if best_test < 0.02 and not opt.second_decay_start:  # 0.013
             opt.second_decay_start = True
             opt.lr *= 0.5
             optimizer = torch.optim.Adam(estimator.parameters(), lr=opt.lr)

@@ -109,7 +109,7 @@ def extract_instances_from_one_image(image_name, condition_dir, condition_grp, p
         pixels[[0,1]] = pixels[[1,0]]  # swap (x ,y) to (y, x)
         pixels = np.concatenate([pixels, points[[2]]], axis=0)  # concat depth
 
-        keep = (pixels[0]>=0) & (pixels[0]<image_shape[0]) & (pixels[1]>=0) & (pixels[1]<image_shape[1])
+        keep = (pixels[0]>=0) & (pixels[0]<downsample_shape[0]) & (pixels[1]>=0) & (pixels[1]<downsample_shape[1])
         pixels = pixels[:, keep]
 
         instance_grp.create_dataset('y_min', data=pixels[0].min())
@@ -132,10 +132,10 @@ def extract_instances_from_one_image(image_name, condition_dir, condition_grp, p
     
     for i in range(n_instances):
         pixels = pixels_all[:2, pixels_all[3] == i].astype(int)
-        flat_mask = np.zeros(image_shape, dtype=bool).ravel()
-        flat_index_array = np.ravel_multi_index(pixels, image_shape)
+        flat_mask = np.zeros(downsample_shape, dtype=bool).ravel()
+        flat_index_array = np.ravel_multi_index(pixels, downsample_shape)
         flat_mask[flat_index_array] = True
-        mask = flat_mask.reshape(image_shape)
+        mask = flat_mask.reshape(downsample_shape)
 
         instance_name = f'{i:02}'
         image_grp.create_dataset(f'{instance_name}/mask', data=mask)
@@ -162,7 +162,7 @@ if __name__ == '__main__':
                 print(f"found {len(image_list)} images in {condition_dir}")
                 image_list.sort()
                 
-                for image_name in tqdm(image_list):
+                for image_name in image_list:
                     extract_instances_from_one_image(image_name, condition_dir, condition_grp, pcd_one)
 
     h.close()
