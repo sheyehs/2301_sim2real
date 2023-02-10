@@ -207,7 +207,7 @@ class PoseDataset(data.Dataset):
         return self.diameters
 
     def get_part_list(self):
-        return sefl.objlist
+        return self.objlist
 
 
 def get_bbox(meta):

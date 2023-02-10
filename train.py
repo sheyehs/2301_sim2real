@@ -38,7 +38,7 @@ def main():
         opt.num_objects = 10 
         opt.num_points = 500
         opt.result_dir = f'results/{time.strftime("%m%d")}_lr_{opt.lr}'
-        opt.repeat_epoch = 2  # 10
+        opt.repeat_epoch = 3  # 10
     else:
         print('unknown dataset')
         return

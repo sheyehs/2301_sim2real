@@ -1,7 +1,7 @@
 #!/bin/bash
 
-#SBATCH --job-name=lr_5e-5
-#SBATCH --output=lr_5e-5.out
+#SBATCH --job-name=lr_7.5e-4
+#SBATCH --output=lr_7.5e-4.out
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=20
@@ -18,5 +18,5 @@ singularity exec --nv \
 	    /scratch/work/public/singularity/cuda11.2.2-cudnn8-devel-ubuntu20.04.sif \
 	    /bin/bash -c "source /ext3/env.sh;
                       cd /scratch/gc2720/2301_sim2real;
-                      python train.py --lr 5e-5"
+                      python train.py --lr 7.5e-4"
 					  

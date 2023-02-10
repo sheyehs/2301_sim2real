@@ -2,7 +2,7 @@
 envs/*.ext3
 2022-11-15.zip
 *.hdf5
-results/
+results*/
 eval_results/
 eval_saved_images/
 sbatch/*.out

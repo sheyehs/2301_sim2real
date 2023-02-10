@@ -15,17 +15,17 @@ import time
 parser = argparse.ArgumentParser()
 parser.add_argument('--gpu_id', type=str, default='0', help='GPU id')
 parser.add_argument('--model', type=str, default='./results/0208_lr_0.0001/pose_model_99_0.038202.pth',  help='Evaluation model')
-parser.add_argument('--dataset_root', type=str, default='data.hdf5', help='dataset root dir')
+parser.add_argument('--dataset', type=str, default='data.hdf5', help='dataset root dir')
 parser.add_argument('--split_dir', type=str, default='./split')
 parser.add_argument('--split_file', type=str, default='eval.txt')
 parser.add_argument('--pcd_dir', type=str, default='./models')
 parser.add_argument('--num_objects', type=int, default=10)
 args = parser.parse_args()
 
-date = time.strftime("%m%d")
-output_result_dir = f'./eval_results/{date}'
+date = time.strftime("%m%d_%H%M")
+output_result_dir = f'./results_eval/{date}'
 os.makedirs(output_result_dir, exist_ok=True)
-out_image_dir = f'./eval_results/{date}/images'
+out_image_dir = f'./results_eval/{date}/images'
 os.makedirs(out_image_dir, exist_ok=True)
 
 image_shape = (400, 640, 3)
@@ -41,7 +41,7 @@ estimator.load_state_dict(torch.load(args.model))
 estimator.eval()
 
 def main():
-    test_dataset = PoseDataset('eval', num_points, False, args.dataset_root, 0.0, args.split_dir)  # add args.split_file
+    test_dataset = PoseDataset('eval', num_points, False, args.dataset, 0.0, args.split_dir)  # add args.split_file
     test_dataloader = torch.utils.data.DataLoader(test_dataset, batch_size=1, shuffle=False, num_workers=10)
     sym_list = test_dataset.get_sym_list()
     # rot_anchors = torch.from_numpy(estimator.rot_anchors).float().cuda()
@@ -83,11 +83,11 @@ def main():
 
         if dis < 0.1 * diameter[idx[0].item()]:
             success_count[idx[0].item()] += 1
-            print('No.{0} Pass! Distance: {1}'.format(i, dis))
-            fw.write('No.{0} Pass! Distance: {1}\n'.format(i, dis))
+            print('{0} Pass! Distance: {1}'.format(instance_path, dis))
+            fw.write('{0} Pass! Distance: {1}\n'.format(instance_path, dis))
         else:
-            # print('No.{0} NOT Pass! Distance: {1}'.format(i, dis))
-            fw.write('No.{0} NOT Pass! Distance: {1}\n'.format(i, dis))
+            print('{0} NOT Pass! Distance: {1}'.format(instance_path, dis))
+            fw.write('{0} NOT Pass! Distance: {1}\n'.format(instance_path, dis))
         num_count[idx[0].item()] += 1
 
     accuracy = 0.0

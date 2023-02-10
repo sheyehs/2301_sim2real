@@ -29,7 +29,7 @@ elif mode == 'eval':
     use_ratio = 0.0025
     data_path = '../data.hdf5'
 elif mode == 'eval_on_real':
-    use_ratio = 0.0025
+    use_ratio = 1
     data_path = '../data_real_new.hdf5'
 
 h = h5py.File(data_path, 'r')
