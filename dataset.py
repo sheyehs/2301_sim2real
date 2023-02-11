@@ -13,7 +13,7 @@ image_height = 400
 image_width = 640
 
 class PoseDataset(data.Dataset):
-    def __init__(self, mode, num, add_noise, root, noise_trans, split_root):
+    def __init__(self, mode, num, add_noise, root, noise_trans, split_root, split_file):
         self.root = root
         self.split_root = split_root
         self.model_root = './models'
@@ -43,12 +43,8 @@ class PoseDataset(data.Dataset):
 
         item_count = 0
         for item in self.objlist:
-            if self.mode == 'train':
-                input_file = open(f'{self.split_root}/{item}/train.txt')
-            elif self.mode == 'test':
-                input_file = open(f'{self.split_root}/{item}/test.txt')
-            elif self.mode == 'eval':
-                input_file = open(f'{self.split_root}/{item}/eval.txt')
+            input_file = open(f'{self.split_root}/{item}/{split_file}')
+   
             while 1:
                 item_count += 1
                 input_line = input_file.readline()

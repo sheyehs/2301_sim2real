@@ -14,7 +14,7 @@ import time
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--gpu_id', type=str, default='0', help='GPU id')
-parser.add_argument('--model', type=str, default='./results/0208_lr_0.0001/pose_model_99_0.038202.pth',  help='Evaluation model')
+parser.add_argument('--model', type=str, default='',  help='Evaluation model')
 parser.add_argument('--dataset', type=str, default='data.hdf5', help='dataset root dir')
 parser.add_argument('--split_dir', type=str, default='./split')
 parser.add_argument('--split_file', type=str, default='eval.txt')
@@ -41,7 +41,7 @@ estimator.load_state_dict(torch.load(args.model))
 estimator.eval()
 
 def main():
-    test_dataset = PoseDataset('eval', num_points, False, args.dataset, 0.0, args.split_dir)  # add args.split_file
+    test_dataset = PoseDataset('eval', num_points, False, args.dataset, 0.0, args.split_dir, args.split_dir)
     test_dataloader = torch.utils.data.DataLoader(test_dataset, batch_size=1, shuffle=False, num_workers=10)
     sym_list = test_dataset.get_sym_list()
     # rot_anchors = torch.from_numpy(estimator.rot_anchors).float().cuda()

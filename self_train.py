@@ -1,4 +1,4 @@
-from auto_label import *
+from auto_label import label_poses_with_teacher
 import os
 import sys
 import glob
@@ -14,11 +14,11 @@ from lib.ransac_voting.ransac_voting_gpu import ransac_voting_layer
 from lib.transformations import quaternion_matrix
 from lib.knn.__init__ import KNearestNeighbor
 from lib.utils import setup_logger
-from dataset.robotics.dataset import PoseDataset
+from dataset import PoseDataset
 import logging
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--dataset', type=str, default='robotics')
+parser.add_argument('--initial_model', type=str)
 parser.add_argument('--renderer_model_dir', type=str, default='renderer/robi_models')
 parser.add_argument('--gpu_id', type=str, default='0', help='GPU id')
 parser.add_argument('--num_rot', type=int, default=60, help='number of rotation anchors')
@@ -201,22 +201,24 @@ def self_training_with_real_data(iter_idx = 1, estimator_best_test = np.Inf, rob
             torch.save(estimator.state_dict(), '{0}/pose_model.pth'.format(opt.resume_dir))
     return best_test
 
-def iterative_self_training(robi_object, start_iterations, num_iterations):
+def iterative_self_training(start_iterations, num_iterations):
     estimator_best_test = opt.best_metric
+    print('Self-training will start from {0}-th iteration and stop at {1}-th iteration.'.format(opt.iter_start, opt.iter-1))
 
     for iter in range(start_iterations, num_iterations):
         # if just transfer from virtual training to real training
         if iter == 0:
             # prepare directory to store real models during self-training
-            resume_model_dir = './real_models/best'
-            if not os.path.exists(resume_model_dir):
-                os.makedirs(resume_model_dir)
+            time_start = time.strftime('%m%d_%H%M')
+            root_dir = f'./results_self-training/{time_start}'
+            os.makedirs(root_dir, exist_ok=True)
             # get trained virtual model
-            virtual_model_path = './virtual_models/pose_model_33_0.035039.pth'
-            if not os.path.exists(virtual_model_path):
+            if not os.path.exists(opt.initial_model):
                 print('error, the initial model does not exist!')
                 sys.exit()
-            shutil.copy(virtual_model_path, resume_model_dir)
+            shutil.copy(opt.initial_model, os.path.join(root_dir, 'initial_model'))
+            print(f'Initial model is: {opt.initial_model}')
+            print(f'Self-training results will be output to {out_dir}')
 
         # # delete the old training data to save the storage
         # if iter >= 3:
@@ -224,13 +226,11 @@ def iterative_self_training(robi_object, start_iterations, num_iterations):
         #     shutil.rmtree(old_training_data_dir)
 
         # filter pseudo-labels from teacher
-        label_poses_with_teacher(iter + 1, renderer_model_dir=opt.renderer_model_dir, obj_id = robi_object, intrinsics=intrinsics)
+        label_poses_with_teacher(iter, root_dir)
         # update numbers of real instances that have been used
         update_train_test_split('./data/' + robi_object + '/teacher_label_iter_' + str(iter+1).zfill(2), './dataset/' + robi_object +'/dataset_config')
         # train student model
         estimator_best_test = self_training_with_real_data(iter + 1, estimator_best_test, robi_object)
 
 if __name__ == '__main__':
-    print('Self-training for {0}, and will start training from {1}-th iterations and will stop at {2}-th iterations'.format(opt.dataset, opt.iter_start+1, opt.iter))
-    print('Initial best metric valus is {0}'.format(opt.best_metric))
-    iterative_self_training(opt.dataset, opt.iter_start, opt.iter)
+    iterative_self_training(opt.iter_start, opt.iter)

@@ -1,7 +1,6 @@
-# import open3d as o3d
 import glob
 import cv2
-import _pickle as cPickle
+import h5py
 import torch
 import torchvision.transforms as transforms
 from torch.autograd import Variable
@@ -9,7 +8,6 @@ from lib.transformations import quaternion_matrix
 from lib.network import PoseNet
 from lib.ransac_voting.ransac_voting_gpu import ransac_voting_layer
 from lib.utils import load_obj, uniform_sample, transform_coordinates_3d
-
 from lib.knn.__init__ import KNearestNeighbor
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -188,49 +186,26 @@ def measuring_pseudo_pose_in_2d(obj_id, inst_id, pose, observed_img, observed_ma
     
     return mask_error, perceptual_error
 
-def label_poses_with_teacher(iter_idx, renderer_model_dir, obj_id, intrinsics, render_h=480, render_w=480):
+def label_poses_with_teacher(iter_idx, root_dir):
     knn = KNearestNeighbor(1)
-    render_height = render_h
-    render_width = render_w
-    ren = DIBRenderer(render_height, render_width, mode="VertexColorBatch")
-    obj_paths = [os.path.join(renderer_model_dir, "{}/textured.obj".format(obj_id))]
-    texture_paths = [os.path.join(renderer_model_dir, "{}/texture_map.png".format(obj_id))]
-    ren_model = load_objs(obj_paths, texture_paths, height=render_height, width=render_width)
-
-    cad_model_name = obj_id
-    data_root_dir = './data'
-    cad_model_path = data_root_dir + '/cad_models/' + cad_model_name + '.obj'
-    cad_model_pcs, cad_model_faces = load_obj(cad_model_path)
 
     # load the trained network for pose labelling
-    estimator = PoseNet(num_points = 1000, num_obj = 1, num_rot = 60)
+    estimator = PoseNet(num_points=1000, num_obj=10, num_rot=60)
     estimator.cuda()
-    estimator.load_state_dict(torch.load('./real_models/' + obj_id + '/best/pose_model.pth'))
+    if iter_idx == 0:
+        prev_model_path = os.path.join(root_dir, 'initial_model')
+    else:
+        prev_model_path = os.path.join(root_dir, f'iteration_{iter_idx-1:02}')
+    estimator.load_state_dict(torch.load(prev_model_path))
     estimator.eval()
+    
+    # should create another mode for train?
+    dataset = PoseDataset('eval', num_points, False, args.dataset, 0.0, args.split_dir, args.split_file)
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False, num_workers=10)
+    sym_list = dataset.get_sym_list()
+    diameters = dataset.get_diameter()
+    part_list = dataset.get_part_list()
 
-    # read the data for current object
-    current_obj_data_dir = os.path.join(data_root_dir, obj_id, 'training_data')
-
-    # color image
-    img_pathes = glob.glob(current_obj_data_dir + '/*_color.png')
-    img_pathes = sorted(img_pathes, key=lambda a: a.split('/')[-1].split('.')[0])
-
-    # depth image
-    depth_pathes = glob.glob(current_obj_data_dir + '/*_depth.png')
-    depth_pathes = sorted(depth_pathes, key=lambda a: a.split('/')[-1].split('.')[0])
-
-    # mask image
-    mask_pathes = glob.glob(current_obj_data_dir + '/*_mask.png')
-    mask_pathes = sorted(mask_pathes, key=lambda a: a.split('/')[-1].split('.')[0])
-
-    # label
-    label_pathes = glob.glob(current_obj_data_dir + '/*_label.pkl')
-    label_pathes = sorted(label_pathes, key=lambda a: a.split('/')[-1].split('.')[0])
-
-    # data name
-    data_names = []
-    for i in range(len(img_pathes)):
-        data_names.append(img_pathes[i].split('/')[-1].split('.')[0][:-6])
     # trverse all scenes for labelling
     scene_poses = []
     scene_residuals = [] # 3d error
@@ -239,146 +214,93 @@ def label_poses_with_teacher(iter_idx, renderer_model_dir, obj_id, intrinsics, r
     scene_2d_errors = []
     scene_valid_iid = []
 
-    flatten_residuals = []
-    flatten_mask_errors = []
-    flatten_rgb_errors = []
-    flatten_2d_errors = []
+    instances = []
 
     total_inst_num = 0
-    for i in range(len(img_pathes)):
-    # for i in range(10):
-        print(i, img_pathes[i])
-        current_scene_poses = []
-        current_scene_residuals = []
-        current_scene_mask_errors = []
-        current_scene_rgb_errors = []
-        current_scene_2d_errors = []
-        current_scene_valid_iid = []
-        # name check
+
+    for i, data in enumerate(dataloader):
+        points, choose, img, target_r, model_points, idx, gt_t, instance_path, K, color = data
+        obj_diameter = diameters[idx.item()]
+        points, choose, img, target_r, model_points, idx = Variable(points).cuda(), \
+                                                            Variable(choose).cuda(), \
+                                                            Variable(img).cuda(), \
+                                                            Variable(target_r).cuda(), \
+                                                            Variable(model_points).cuda(), \
+                                                            Variable(idx).cuda()
+
+
+        # sample points
+        observed_mask = np.equal(mask, inst_id)
+        current_mask = np.equal(mask, inst_id)
+        current_mask = np.logical_and(current_mask, depth > 0)  # valid depth
+
+        pred_r, pred_t, pred_c = estimator(img, points, choose, index)
+        try:
+            pred_t, pred_mask = ransac_voting_layer(points, pred_t)
+        except RuntimeError:
+            print('RANSAC voting fails')
+            continue
         
-        assert(data_names[i] == img_pathes[i].split('/')[-1].split('.')[0][:-6])
-        assert(data_names[i] == depth_pathes[i].split('/')[-1].split('.')[0][:-6])
-        assert(data_names[i] == mask_pathes[i].split('/')[-1].split('.')[0][:-5])
-        assert(data_names[i] == label_pathes[i].split('/')[-1].split('.')[0][:-6])
+        pred_t = pred_t.cpu().data.numpy()
+        how_min, which_min = torch.min(pred_c, 1)
+        pred_r = pred_r[0][which_min[0]].view(-1).cpu().data.numpy()
+        points = points.view(num_points, 3)
+        pred_r = quaternion_matrix(pred_r)[:3, :3]
+
+        pts_in_obj = np.matmul(model_points, pred_r.T) + pred_t
+    
+        # compute error
+        dis_3d = measure_pseudo_pose_in_3d(points, pts_in_obj, pred_r, pred_t, knn)
         
-        img = cv2.imread(img_pathes[i])[:, :, :3]
-        img = img[:, :, ::-1]
-        depth = cv2.imread(depth_pathes[i], -1)
-        mask = cv2.imread(mask_pathes[i], -1)  # contains all instances in one scene, marked by their instance id + 1
-        with open(label_pathes[i], 'rb') as f:
-            label = cPickle.load(f)
-        
-        # traverse all instances in each scene for labelling
-        for iid in range(len(label['instance_ids'])):
-            total_inst_num += 1
-            inst_id = label['instance_ids'][iid] + 1
+        mask_error, _ = measuring_pseudo_pose_in_2d(obj_id, total_inst_num, pose_from_teacher, img, observed_mask, ren, ren_model, render_height, render_width, intrinsics)
 
-            # sample points
-            observed_mask = np.equal(mask, inst_id)
-            current_mask = np.equal(mask, inst_id)
-            current_mask = np.logical_and(current_mask, depth > 0)  # valid depth
+        scene_poses.append((pred_r, pred_t))
 
-            pose_from_teacher, pts_in_camera, pts_in_obj = label_individual_pose(estimator, img, depth, current_mask, intrinsics, cad_model_pcs, cad_model_faces)
-            if pose_from_teacher is not None:
-                dis_3d = measure_pseudo_pose_in_3d(pts_in_camera, pts_in_obj, pose_from_teacher, knn)
-                current_scene_valid_iid.append(label['instance_ids'][iid])
-                
-                current_scene_poses.append(pose_from_teacher)
-                current_scene_residuals.append(dis_3d)
-                flatten_residuals.append(dis_3d)
-
-                mask_error, rgb_error = measuring_pseudo_pose_in_2d(obj_id, total_inst_num, pose_from_teacher, img, observed_mask, ren, ren_model, render_height, render_width, intrinsics)
-
-                current_scene_mask_errors.append(mask_error)
-                flatten_mask_errors.append(mask_error)
-
-                current_scene_rgb_errors.append(rgb_error)
-                flatten_rgb_errors.append(rgb_error)
-
-                current_scene_2d_errors.append(mask_error * rgb_error)
-                flatten_2d_errors.append(mask_error * rgb_error)
-
-        scene_poses.append(current_scene_poses)
-        scene_residuals.append(current_scene_residuals)
-        scene_mask_errors.append(current_scene_mask_errors)
-        scene_rgb_errors.append(current_scene_rgb_errors)
-        scene_2d_errors.append(current_scene_2d_errors)
-        scene_valid_iid.append(current_scene_valid_iid)
+        scene_residuals.append(dis_3d)
+        scene_mask_errors.append(mask_error)
+        scene_rgb_errors.append(rgb_error)
+        scene_2d_errors.append(mask_error)
+        instances.append(instance_path)
 
     # compute statistics information for all residuals
-    mean_residual = np.mean(np.array(flatten_residuals))
-    var_residual = np.std(np.array(flatten_residuals))
+    mean_residual = np.mean(np.array(scene_residuals))
+    var_residual = np.std(np.array(scene_residuals))
     threshold_3d_error = mean_residual + var_residual
 
-    mean_2d_error = np.mean(np.array(flatten_2d_errors))
-    var_2d_error = np.std(np.array(flatten_2d_errors))
+    mean_2d_error = np.mean(np.array(scene_2d_errors))
+    var_2d_error = np.std(np.array(scene_2d_errors))
     threshold_2d_error = mean_2d_error + var_2d_error
 
     # filtering out the pose whose residual is larger than the threshold
-    scene_good_iid = []
     scene_good_poses = []
     good_scene_names = []
 
     valid_inst_num = 0
     for i in range(len(scene_poses)):
-        current_scene_good_iid = []
-        current_scene_good_poses = []
-        assert(len(scene_residuals[i]) == len(scene_poses[i]))
-        assert(len(scene_residuals[i]) == len(scene_valid_iid[i]))
 
-        for j in range(len(scene_residuals[i])):
-            if scene_2d_errors[i][j] < threshold_2d_error and scene_residuals[i][j] < threshold_3d_error:
-                current_scene_good_iid.append(scene_valid_iid[i][j])
-                current_scene_good_poses.append(scene_poses[i][j])
-                valid_inst_num += 1
-
-        if len(current_scene_good_iid) > 1:
-            good_scene_names.append(data_names[i])
-            scene_good_iid.append(current_scene_good_iid)
-            scene_good_poses.append(current_scene_good_poses)
+        if scene_2d_errors[i] < threshold_2d_error and scene_residuals[i] < threshold_3d_error:
+            good_scene_names.append(instances[i])
+            scene_good_poses.append(scene_poses[i])
+            valid_inst_num += 1
 
     # also need to update the label.pkl and the mask.png at the same time
-    teacher_label_dir = os.path.join(data_root_dir, obj_id, 'teacher_label_iter_' + str(iter_idx).zfill(2))
-    if not os.path.exists(teacher_label_dir):
-        os.makedirs(teacher_label_dir)
+    teacher_label_dir = os.path.join(root_dir, f'iteration_{iter_idx:02}')
+    os.makedirs(teacher_label_dir, exist_ok=True)
     
+"""
+teacher_labels_R_t.hdf5 hierarchy
+company | part  | condition | image | instance  | R
+                                                | t
+
+"""
+    h_path = os.path.join(teacher_label_dir, 'teacher_labels_R_t.hdf5')
+    h = h5py.File(h_path,'a')
+
     for i in range(len(good_scene_names)):
-        # update the label.pkl
-        current_label = {}
-        current_label['instance_ids'] = scene_good_iid[i]
+        instance_grp = h.require_group(good_scene_names[i])
+        h.create_dataset('R', data=np.array(scene_good_poses[i][0]))
+        h.create_dataset('t', data=np.array(scene_good_poses[i][1]))
 
-        translations = np.zeros((len(scene_good_poses[i]), 3))
-        rotations = np.zeros((len(scene_good_poses[i]), 3, 3))
-
-        for j in range(len(scene_good_poses[i])):
-            translations[j, :] = scene_good_poses[i][j][:3, 3]
-            rotations[j, :, :] = scene_good_poses[i][j][:3, :3]
-        current_label['translations'] = translations.astype(np.float32)
-        current_label['rotations'] = rotations.astype(np.float32)
-
-        # update the mask.png
-        current_label['bboxes'] = []
-        original_mask = cv2.imread(os.path.join(current_obj_data_dir, good_scene_names[i] + '_mask.png'), -1)
-        updated_mask = np.ones(original_mask.shape[:2], dtype=np.uint8) * 255
-        for j in range(len(scene_good_iid[i])):
-            inst_id = scene_good_iid[i][j] + 1
-            current_mask = np.equal(original_mask, inst_id)
-            updated_mask[current_mask] = inst_id
-            
-            bbox = current_mask.flatten().nonzero()[0]
-            ys = bbox // original_mask.shape[1]
-            xs = bbox - ys * original_mask.shape[1]
-            bbox = [np.min(ys), np.min(xs), np.max(ys), np.max(xs)]
-            current_label['bboxes'].append(bbox)
-        
-        img = cv2.imread(os.path.join(current_obj_data_dir, good_scene_names[i] + '_color.png'), -1)
-        depth = cv2.imread(os.path.join(current_obj_data_dir, good_scene_names[i] + '_depth.png'), -1)
-        cv2.imwrite(os.path.join(teacher_label_dir, good_scene_names[i] + '_color.png'), img)
-        cv2.imwrite(os.path.join(teacher_label_dir, good_scene_names[i] + '_depth.png'), depth)
-
-        cv2.imwrite(os.path.join(teacher_label_dir, good_scene_names[i] + '_mask.png'), updated_mask)
-        with open(os.path.join(teacher_label_dir, good_scene_names[i] + '_label.pkl'), 'wb') as f:
-            cPickle.dump(current_label, f)
     del knn
 
 if __name__ == '__main__':

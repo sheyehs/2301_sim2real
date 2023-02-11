@@ -19,6 +19,6 @@ singularity exec --nv \
 	    /bin/bash -c "source /ext3/env.sh;
                       cd /scratch/gc2720/2301_sim2real;
                       python eval.py --model /scratch/gc2720/2301_sim2real/results/0209_lr_0.0005/pose_model_99_0.024581.pth \
-					  				 --dataset data.hdf5 \
-					  				 --split_file eval.txt"
+					  				 --dataset data_real_new.hdf5 \
+					  				 --split_file eval_on_real.txt"
 					  
