@@ -31,7 +31,7 @@ parser.add_argument('--resume_posenet', type=str, default='pose_model.pth', help
 parser.add_argument('--nepoch', type=int, default=10, help='max number of epochs to train')
 parser.add_argument('--iter_start', type=int, default=0, help='the start number of iterations for self-training')
 parser.add_argument('--best_metric', type=float, default=100000.0)
-parser.add_argument('--iter', type=int, default=5, help='the total number of iterations for self-training')
+parser.add_argument('--iter', type=int, default=50, help='the total number of iterations for self-training')
 parser.add_argument('--validation', action='store_true', default=False, help='valid the real model with a small number of real data')
 opt = parser.parse_args()
 
@@ -210,13 +210,13 @@ def iterative_self_training(start_iterations, num_iterations):
         if iter == 0:
             # prepare directory to store real models during self-training
             time_start = time.strftime('%m%d_%H%M')
-            root_dir = f'./results_self-training/{time_start}'
-            os.makedirs(root_dir, exist_ok=True)
+            out_dir = f'./results_self-training/{time_start}'
+            os.makedirs(out_dir, exist_ok=True)
             # get trained virtual model
             if not os.path.exists(opt.initial_model):
                 print('error, the initial model does not exist!')
                 sys.exit()
-            shutil.copy(opt.initial_model, os.path.join(root_dir, 'initial_model'))
+            shutil.copy(opt.initial_model, os.path.join(out_dir, 'initial_model'))
             print(f'Initial model is: {opt.initial_model}')
             print(f'Self-training results will be output to {out_dir}')
 
@@ -226,11 +226,11 @@ def iterative_self_training(start_iterations, num_iterations):
         #     shutil.rmtree(old_training_data_dir)
 
         # filter pseudo-labels from teacher
-        label_poses_with_teacher(iter, root_dir)
+        label_poses_with_teacher(iter, root_dir, args)
         # update numbers of real instances that have been used
-        update_train_test_split('./data/' + robi_object + '/teacher_label_iter_' + str(iter+1).zfill(2), './dataset/' + robi_object +'/dataset_config')
+        # update_train_test_split('./data/' + robi_object + '/teacher_label_iter_' + str(iter+1).zfill(2), './dataset/' + robi_object +'/dataset_config')
         # train student model
-        estimator_best_test = self_training_with_real_data(iter + 1, estimator_best_test, robi_object)
+        estimator_best_test = self_training_with_real_data(iter, root_dir, args, estimator_best_test)
 
 if __name__ == '__main__':
     iterative_self_training(opt.iter_start, opt.iter)
