@@ -65,9 +65,9 @@ def label_poses_with_teacher(iter_idx, root_dir, args):
     estimator = PoseNet(num_points=500, num_obj=10, num_rot=60)
     estimator.cuda()
     if iter_idx == 0:
-        prev_model_path = os.path.join(root_dir, 'initial_model')
+        prev_model_path = os.path.join(root_dir, 'initial', 'model.pth')
     else:
-        prev_model_path = os.path.join(root_dir, f'iteration_{iter_idx-1:02}')
+        prev_model_path = os.path.join(root_dir, f'iteration_{iter_idx-1:02}', 'model.pth')
     estimator.load_state_dict(torch.load(prev_model_path))
     estimator.eval()
     

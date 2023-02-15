@@ -41,7 +41,7 @@ estimator.load_state_dict(torch.load(args.model))
 estimator.eval()
 
 def main():
-    test_dataset = PoseDataset('eval', num_points, False, args.dataset, 0.0, args.split_dir, args.split_dir)
+    test_dataset = PoseDataset('eval', num_points, False, args.dataset, 0.0, args.split_dir, args.split_file)
     test_dataloader = torch.utils.data.DataLoader(test_dataset, batch_size=1, shuffle=False, num_workers=10)
     sym_list = test_dataset.get_sym_list()
     # rot_anchors = torch.from_numpy(estimator.rot_anchors).float().cuda()

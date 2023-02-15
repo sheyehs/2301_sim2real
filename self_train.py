@@ -66,19 +66,20 @@ def setup_logger(logger_name, log_file, level=logging.INFO):
     l.addHandler(streamHandler)
     return l
 
-def self_training_with_real_data(iter_idx = 1, estimator_best_test = np.Inf, robi_object = '01'):
-    opt.model_dir = 'real_models/' + robi_object + '/' + str(iter_idx).zfill(2) #folder to save trained models
-    opt.log_dir = opt.model_dir + '/logs'
-    if not os.path.exists(opt.model_dir):
-        os.makedirs(opt.model_dir)
-    if not os.path.exists(opt.log_dir):
-        os.makedirs(opt.log_dir)
+def self_training_with_real_data(iter_idx, root_dir, args, estimator_best_test = np.Inf):
+    curr_dir = os.path.join(root_dir, f'iteration_{iter_idx:02}')  # folder to save trained models
+    curr_log_dir = os.path.join(curr_dir, 'logs')
+    os.makedirs(curr_dir, exist_ok=True)
+    os.makedirs(curr_log_dir, exist_ok=True)
 
     estimator = PoseNet(num_points = opt.num_points, num_obj = opt.num_objects, num_rot = opt.num_rot)
     estimator.cuda()
 
-    opt.resume_dir = 'real_models/' + robi_object + '/best'
-    estimator.load_state_dict(torch.load('{0}/{1}'.format(opt.resume_dir, opt.resume_posenet)))
+    if iter_idx == 0:
+        prev_model_path = os.path.join(root_dir, 'initial', 'model.pth')
+    else:
+        prev_model_path = os.path.join(root_dir, f'iteration_{iter_idx-1:02}', 'model.pth')
+    estimator.load_state_dict(torch.load(prev_model_path))
 
     opt.train_dataset_root = './data/' + robi_object + '/teacher_label_iter_' + str(iter_idx).zfill(2)
     dataset = PoseDataset('train', opt.num_points, True, opt.train_dataset_root, opt.noise_trans)
@@ -191,14 +192,15 @@ def self_training_with_real_data(iter_idx = 1, estimator_best_test = np.Inf, rob
             logger.info('Test time {0} Epoch {1} TEST FINISH Avg dis: {2}'.format(time.strftime("%Hh %Mm %Ss", time.gmtime(time.time() - st_time)), epoch, test_dis))
             if test_dis < best_test:
                 best_test = test_dis
-                torch.save(estimator.state_dict(), '{0}/pose_model_{1}_{2}.pth'.format(opt.model_dir, epoch, test_dis))
-                torch.save(estimator.state_dict(), '{0}/pose_model.pth'.format(opt.model_dir))
-                torch.save(estimator.state_dict(), '{0}/pose_model.pth'.format(opt.resume_dir))
+                torch.save(estimator.state_dict(), '{0}/pose_model_{1}_{2}.pth'.format(curr_dir, epoch, test_dis))
+                torch.save(estimator.state_dict(), '{0}/pose_model.pth'.format(curr_dir))
+                torch.save(estimator.state_dict(), '{0}/pose_model.pth'.format(last_dir))
                 logger.info('%d >>>>>>>>----------BEST TEST MODEL SAVED---------<<<<<<<<' % epoch)
         else: # if there is no validation data, directly save model of the last epoch
-            torch.save(estimator.state_dict(), '{0}/pose_model_{1}.pth'.format(opt.model_dir, epoch))
-            torch.save(estimator.state_dict(), '{0}/pose_model.pth'.format(opt.model_dir))
-            torch.save(estimator.state_dict(), '{0}/pose_model.pth'.format(opt.resume_dir))
+            torch.save(estimator.state_dict(), '{0}/pose_model_{1}.pth'.format(curr_dir, epoch))
+            torch.save(estimator.state_dict(), '{0}/pose_model.pth'.format(curr_dir))
+            torch.save(estimator.state_dict(), '{0}/pose_model.pth'.format(last_dir))
+
     return best_test
 
 def iterative_self_training(start_iterations, num_iterations):
@@ -226,11 +228,11 @@ def iterative_self_training(start_iterations, num_iterations):
         #     shutil.rmtree(old_training_data_dir)
 
         # filter pseudo-labels from teacher
-        label_poses_with_teacher(iter, root_dir, args)
+        label_poses_with_teacher(iter, out_dir, opt)
         # update numbers of real instances that have been used
         # update_train_test_split('./data/' + robi_object + '/teacher_label_iter_' + str(iter+1).zfill(2), './dataset/' + robi_object +'/dataset_config')
         # train student model
-        estimator_best_test = self_training_with_real_data(iter, root_dir, args, estimator_best_test)
+        estimator_best_test = self_training_with_real_data(iter, out_dir, opt, estimator_best_test)
 
 if __name__ == '__main__':
     iterative_self_training(opt.iter_start, opt.iter)
