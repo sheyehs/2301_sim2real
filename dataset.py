@@ -13,7 +13,10 @@ image_height = 400
 image_width = 640
 
 class PoseDataset(data.Dataset):
-    def __init__(self, mode, num, add_noise, root, noise_trans, split_root, split_file):
+    def __init__(self, mode, num, add_noise, root, noise_trans, split_root, split_file, label_root):
+        """
+        mode: train, test, teacher, student
+        """
         self.root = root
         self.split_root = split_root
         self.model_root = './models'
@@ -43,8 +46,13 @@ class PoseDataset(data.Dataset):
 
         item_count = 0
         for item in self.objlist:
-            input_file = open(f'{self.split_root}/{item}/{split_file}')
-   
+            file_name =  os.path.join(self.split_root, item, split_file)
+            if not os.path.isfile(file_name):
+                print(f'The split list of part {item} does not exist! Skipped.')
+                continue
+
+            input_file = open(file_name, 'r')
+
             while 1:
                 item_count += 1
                 input_line = input_file.readline()

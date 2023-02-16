@@ -43,8 +43,8 @@ def main():
         print('unknown dataset')
         return
     if opt.dataset == 'robotics':
-        dataset = PoseDataset('train', opt.num_points, True, opt.dataset_root, opt.noise_trans, opt.split_dir)
-        test_dataset = PoseDataset('test', opt.num_points, False, opt.dataset_root, 0.0, opt.split_dir)
+        dataset = PoseDataset('train', opt.num_points, True, opt.dataset_root, opt.noise_trans, opt.split_dir, 'train.txt')
+        test_dataset = PoseDataset('test', opt.num_points, False, opt.dataset_root, 0.0, opt.split_dir, 'test.txt')
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=True, num_workers=opt.workers)
     testdataloader = torch.utils.data.DataLoader(test_dataset, batch_size=1, shuffle=False, num_workers=opt.workers)
     opt.sym_list = dataset.get_sym_list()
@@ -110,7 +110,7 @@ def main():
                                                                              Variable(idx).cuda()
                 pred_r, pred_t, pred_c = estimator(img, points, choose, idx)
                 loss, loss_r, loss_t, loss_reg = criterion(pred_r, pred_t, pred_c, target_r, target_t, model_points, idx, obj_diameter)
-                torch.cuda.empty_cache()
+                # torch.cuda.empty_cache()
                 loss.backward()
                 train_loss_avg += loss.item()
                 train_loss_r_avg += loss_r.item()
@@ -148,7 +148,6 @@ def main():
         logger.info('Test time {0}'.format(time.strftime("%Hh %Mm %Ss", time.gmtime(time.time() - st_time)) + ', ' + 'Testing started'))
         test_dis = 0.0
         test_count = 0
-        save_model = False
         estimator.eval()
         success_count = [0 for i in range(opt.num_objects)]
         num_count = [0 for i in range(opt.num_objects)]

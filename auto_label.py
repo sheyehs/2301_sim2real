@@ -1,9 +1,9 @@
 import glob
-import cv2
 import h5py
 import torch
 import torchvision.transforms as transforms
 from torch.autograd import Variable
+from sklearn.model_selection import train_test_split
 from lib.transformations import quaternion_matrix
 from lib.network import PoseNet
 from lib.ransac_voting.ransac_voting_gpu import ransac_voting_layer
@@ -45,8 +45,11 @@ def measuring_mask_in_2d(mask, pcd, bbox, pred_R, pred_t, K):
     y_min, y_max, x_min, x_max = bbox
     pixels = pixels[:, pixels[0]>=y_min & pixels[0]<y_max & pixels[1]>=x_min & pixels[1]<x_max]
 
-    pseudo_mask = np.full(image_shape, False, dtype=bool)
-    pseudo_mask.take(pixels) = True
+    flat_pseudo_mask = np.full(image_shape, False, dtype=bool).ravel()
+    flat_index = np.ravel_multi_index(pixels, image_shape)
+    flat_pseudo_mask[flat_index] = True
+    pseudo_mask = flat_pseudo_mask.reshape(image_shape)
+
     pseudo_mask = pseudo_mask[y_min:y_max, x_min:x_max]
 
     positive_pixels = pseudo_mask[observed_mask > 0]
@@ -64,14 +67,11 @@ def label_poses_with_teacher(iter_idx, root_dir, args):
     # load the trained network for pose labelling
     estimator = PoseNet(num_points=500, num_obj=10, num_rot=60)
     estimator.cuda()
-    if iter_idx == 0:
-        prev_model_path = os.path.join(root_dir, 'initial', 'model.pth')
-    else:
-        prev_model_path = os.path.join(root_dir, f'iteration_{iter_idx-1:02}', 'model.pth')
-    estimator.load_state_dict(torch.load(prev_model_path))
+    teacher_model_path = os.path.join(root_dir, 'best_model', 'best_model.pth')
+    estimator.load_state_dict(torch.load(teacher_model_path))
     estimator.eval()
     
-    dataset = PoseDataset('self_train', num_points, False, args.dataset, 0.0, args.split_dir, args.split_file)
+    dataset = PoseDataset('teacher', num_points, False, args.dataset, 0.0, args.split_dir, args.split_file)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False, num_workers=10)
     sym_list = dataset.get_sym_list()
     diameters = dataset.get_diameter()
@@ -149,24 +149,34 @@ def label_poses_with_teacher(iter_idx, root_dir, args):
     company | part  | condition | image | instance  | R
                                                     | t
     """
-    teacher_label_dir = os.path.join(root_dir, f'iteration_{iter_idx:02}')
-    os.makedirs(teacher_label_dir, exist_ok=True)
+    iteration_dir = os.path.join(root_dir, f'iteration_{iter_idx:02}')
+    os.makedirs(iteration_dir, exist_ok=True)
 
-    h_path = os.path.join(teacher_label_dir, 'teacher_labels.hdf5')
+    h_path = os.path.join(iteration_dir, 'teacher_labels.hdf5')
     h = h5py.File(h_path,'a')
 
-    good_instance_paths = []
+    test_ratio = 0.1
+
+    good_instance_paths = {}
     for i in range(len(pred_poses)):
         if errors_2d[i] < threshold_2d_error and errors_3d[i] < threshold_3d_error:
             good_instance_path = instance_paths[i]
-            good_instance_paths.append(good_instance_path)
+            part_name = good_instance_path.split('/')[-4]
+            if part_name in good_instance_paths.keys():
+                good_instance_paths[part_name].append(good_instance_path)
+            else:
+                good_instance_paths[part_name] = [good_instance_path]
 
             instance_grp = h.require_group(good_instance_path)
             h.create_dataset('R', data=np.array(pred_poses[i][0]))
             h.create_dataset('t', data=np.array(pred_poses[i][1]))
 
-    with open(os.path.join(teacher_label_dir, 'good_instances.txt'), 'w') as f:
-        f.write('\n'.join(good_instance_paths))
+    for part_name, instances in good_instance_paths.items():
+        train, test = train_test_split(instances, test_size=test_ratio)
+        with open(os.path.join(iteration_dir, part_name, 'train.txt'), 'w') as f:
+            f.write('\n'.join(train))
+        with open(os.path.join(iteration_dir, part_name, 'test.txt'), 'w') as f:
+            f.write('\n'.join(test))
 
     print(f'Iteration {iter_idx}: After filtering, {len(good_instance_paths)}/{len(pred_poses)} good labels are created \
             for student learning. Good rate is {len(good_instance_paths)/len(pred_poses)}.')

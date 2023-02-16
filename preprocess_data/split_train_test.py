@@ -3,14 +3,14 @@ import random
 import h5py
 
 i_mode = 2
-out_dir = '../split'
+split_dir = '../split'
 
 #############################################
 
 mode_list = [
-    'train_test',
-    'eval',
-    'eval_on_real'
+    'synthetic',
+    'eval_on_real',
+    'self_train'
 ]
 
 mode = mode_list[i_mode]
@@ -20,17 +20,21 @@ train mode splits train and test data used in train.py
 eval mode chooses data for eval.py which visualizes the predicted position onto original image.  
 """
 
-if mode == 'train_test':
+if mode == 'synthetic':
     use_ratio = 0.025
     test_ratio = 0.1
+    eval_ratio = 0.1
     data_path = '../data.hdf5'
+    out_dir = f'{split_dir}/split_synthetic'
     from sklearn.model_selection import train_test_split
-elif mode == 'eval':
-    use_ratio = 0.0025
-    data_path = '../data.hdf5'
 elif mode == 'eval_on_real':
     use_ratio = 1
     data_path = '../data_real_new.hdf5'
+    out_dir = f'{split_dir}/split_eval_on_real'
+elif mode == 'self_train':
+    use_ratio = 1
+    data_path = '../data_real_new.hdf5'
+    out_dir = f'{split_dir}/split_eval_on_real'
 
 h = h5py.File(data_path, 'r')
 
@@ -40,10 +44,10 @@ for company_name in h:
         part = company[part_name]
         out_path = os.path.join(out_dir, part_name)
         os.makedirs(out_path, exist_ok=True)
+        instance_list = []  # for each kind of part
         for condition_name in part:
             condition = part[condition_name]
             print(f'found {len(condition.keys())} images in {condition.name}')
-            instance_list = []
             for image_name in condition:
                 image = condition[image_name]
                 for instance_name in image:

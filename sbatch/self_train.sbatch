@@ -1,7 +1,7 @@
 #!/bin/bash
 
-#SBATCH --job-name=lr_7.5e-4
-#SBATCH --output=lr_7.5e-4.out
+#SBATCH --job-name=self_train
+#SBATCH --output=self_train.out
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=20
@@ -18,5 +18,5 @@ singularity exec --nv \
 	    /scratch/work/public/singularity/cuda11.2.2-cudnn8-devel-ubuntu20.04.sif \
 	    /bin/bash -c "source /ext3/env.sh;
                       cd /scratch/gc2720/2301_sim2real;
-                      python self_train.py --initial_model "
+                      python self_train.py --initial_model /scratch/gc2720/2301_sim2real/results/0209_lr_0.0005/pose_model_99_0.024581.pth"
 					  

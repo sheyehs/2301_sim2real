@@ -9,7 +9,6 @@
 #SBATCH --time=150:00:00
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=ys5560@nyu.edu
-#SBATCH --gres=gpu:rtx8000:1
 
 module purge
 
