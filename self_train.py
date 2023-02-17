@@ -45,7 +45,8 @@ def self_training_with_real_data(iter_idx, root_dir, args, estimator_best_test =
 
     """
     root_dir    | best      | best_model.pth
-                            | best_model.txt
+                            | record.txt
+                            | initial_model.pth
                 | iteration | teacher_labels.hdf5
                             | good_instances    | part_name | train.txt
                                                             | test.txt
@@ -223,7 +224,11 @@ def iterative_self_training(start_iterations, num_iterations):
             os.makedirs(out_dir, exist_ok=True)
             os.makedirs(os.path.join(out_dir, 'best'), exist_ok=True)
             # get trained virtual model
-            shutil.copy(opt.initial_model, os.path.join(out_dir, 'best', 'best.model.pth'))
+            shutil.copy(opt.initial_model, os.path.join(out_dir, 'best', 'best_model.pth'))
+            shutil.copy(opt.initial_model, os.path.join(out_dir, 'best', 'initial_model.pth'))
+            with open(os.path.join(out_dir, 'best', 'record_model.txt'), 'w') as f:
+                f.write(f'Initial model: {opt.initial_model}\n')
+
             print(f'Initial model is: {opt.initial_model}')
             print(f'Self-training results will be output to {out_dir}')
 

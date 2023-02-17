@@ -1,3 +1,4 @@
+import os
 import glob
 import h5py
 import torch
@@ -7,13 +8,9 @@ from sklearn.model_selection import train_test_split
 from lib.transformations import quaternion_matrix
 from lib.network import PoseNet
 from lib.ransac_voting.ransac_voting_gpu import ransac_voting_layer
-from lib.utils import load_obj, uniform_sample, transform_coordinates_3d
 from lib.knn.__init__ import KNearestNeighbor
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
-
-from renderer.rendering import *
-from perceptual_loss.alexnet_perception import *
 
 # pts_in_camera: (1000, 3)
 # pts_in_obj: (1000, 3)
@@ -35,10 +32,10 @@ def measure_pseudo_pose_in_3d(pts_in_camera, pts_in_obj, R, t, knn):
     cd2 = torch.mean(torch.norm((target_pts.float() - pts2.float()), dim=0)).cpu().item()
     return cd1 + cd2
 
-def measuring_mask_in_2d(mask, pcd, bbox, pred_R, pred_t, K):
+def measuring_mask_in_2d(observed_mask, pcd, bbox, pred_R, pred_t, K, image_shape):
     # project pcd to get pseudo_mask
     points = np.matmul(pred_R, pcd.T) + pred_t
-    pixels = np.matmul(K, points / points[2]).astype(int)[:2]
+    pixels = np.floor(np.matmul(K, points / points[2])[:2]).astype(int)
     pixels = np.unique(pixels, axis=1)
     pixels[[0,1]] = pixels[[1,0]]
 
@@ -71,11 +68,12 @@ def label_poses_with_teacher(iter_idx, root_dir, args):
     estimator.load_state_dict(torch.load(teacher_model_path))
     estimator.eval()
     
-    dataset = PoseDataset('teacher', num_points, False, args.dataset, 0.0, args.split_dir, args.split_file)
+    dataset = PoseDataset('teacher', 500, False, args.dataset, 0.0, args.split_dir, args.split_file)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False, num_workers=10)
     sym_list = dataset.get_sym_list()
     diameters = dataset.get_diameter()
     part_list = dataset.get_part_list()
+    pcd_list = dataset.get_pcd_list()
 
     # trverse all scenes for labelling
     pred_poses = []
@@ -89,42 +87,37 @@ def label_poses_with_teacher(iter_idx, root_dir, args):
 
     for i, data in enumerate(dataloader):
         # add return mask, and full model pcd, bbox, image shape
-        points, choose, img, target_r, model_points, idx, gt_t, instance_path, K, color = data
+        points, choose, img, model_points, idx, instance_path, K, image_shape, bbox, mask = data
         obj_diameter = diameters[idx.item()]  # will be used to normalized error
-        points, choose, img, target_r, model_points, idx = Variable(points).cuda(), \
+        pcd = pcd_list[part_list[idx.item()]]  # to project with pred R, t
+        points, choose, img, model_points, idx = Variable(points).cuda(), \
                                                             Variable(choose).cuda(), \
                                                             Variable(img).cuda(), \
                                                             Variable(target_r).cuda(), \
                                                             Variable(model_points).cuda(), \
                                                             Variable(idx).cuda()
 
-        # need pass the original mask and valid depth mask
-
-        # observed_mask = np.equal(mask, inst_id)
-        # current_mask = np.equal(mask, inst_id)
-        # current_mask = np.logical_and(current_mask, depth > 0)
-
-        pred_r, pred_t, pred_c = estimator(img, points, choose, index)
+        pred_r, pred_t, pred_c = estimator(img, points, choose, idx)
 
         try:
             pred_t, pred_mask = ransac_voting_layer(points, pred_t)
         except RuntimeError:
             print('RANSAC voting fails')
             continue
-        
         pred_t = pred_t.cpu().data.numpy()
+
         how_min, which_min = torch.min(pred_c, 1)
         pred_r = pred_r[0][which_min[0]].view(-1).cpu().data.numpy()
         pred_r = quaternion_matrix(pred_r)[:3, :3]
         pts_in_obj = np.matmul(model_points, pred_r.T) + pred_t
 
-        pts_in_camera = points.view(num_points, 3)  # pts in camera
+        pts_in_camera = points.view(500, 3)  # pts in camera
     
         # compute error
-        dis_3d = measure_pseudo_pose_in_3d(points, pts_in_obj, pred_r, pred_t, knn)
+        dis_3d = measure_pseudo_pose_in_3d(pts_in_camera, pts_in_obj, pred_r, pred_t, knn)
         dis_3d /= obj_diameter
         
-        mask_error = measuring_mask_in_2d(mask, pcd, bbox, pred_R, pred_t, K)
+        mask_error = measuring_mask_in_2d(mask, pcd, bbox, pred_R, pred_t, K, image_shape)
         error_2d = mask_error
 
         pred_poses.append((pred_r, pred_t))

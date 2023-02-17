@@ -15,7 +15,7 @@ image_width = 640
 class PoseDataset(data.Dataset):
     def __init__(self, mode, num, add_noise, root, noise_trans, split_root, split_file, label_root):
         """
-        mode: train, test, teacher, student
+        mode: train, projection, teacher, student
         """
         self.root = root
         self.split_root = split_root
@@ -122,11 +122,11 @@ class PoseDataset(data.Dataset):
 
         if self.add_noise:
             img = self.trancolor(img)
-        img_masked = np.array(img)
+        img = np.array(img)
 
         meta = h[self.list_rank[index]]
         rmin, rmax, cmin, cmax = get_bbox(meta)  # choose predifined box size 
-        img_masked = img_masked[rmin:rmax, cmin:cmax, :3]
+        img_masked = img[rmin:rmax, cmin:cmax, :3]
         
         target_r = np.resize(np.array(meta['R']), (3, 3))
         target_t = np.array(meta['t']) / self.cam_scale
@@ -177,26 +177,43 @@ class PoseDataset(data.Dataset):
 
         h.close()
 
-        if self.mode in ['train', 'test']:
-            return torch.from_numpy(cloud.astype(np.float32)), \
-                torch.LongTensor(choose.astype(np.int32)), \
-                self.transform(img_masked), \
-                torch.from_numpy(target_t.astype(np.float32)), \
-                torch.from_numpy(target_r.astype(np.float32)), \
-                torch.from_numpy(model_points.astype(np.float32)), \
-                torch.LongTensor([obj]), \
-                torch.from_numpy(gt_t.astype(np.float32))
-        elif self.mode == 'eval':
-            return torch.from_numpy(cloud.astype(np.float32)), \
-                torch.LongTensor(choose.astype(np.int32)), \
-                self.transform(img_masked), \
-                torch.from_numpy(target_r.astype(np.float32)), \
-                torch.from_numpy(model_points.astype(np.float32)), \
-                torch.LongTensor([obj]), \
-                torch.from_numpy(gt_t.astype(np.float32)), \
-                instance_path, \
-                K, \
-                np.array(img)
+        ret = [
+            torch.from_numpy(cloud.astype(np.float32)),
+            torch.LongTensor(choose.astype(np.int32)),
+            self.transform(img_masked),
+            torch.from_numpy(target_t.astype(np.float32)),
+            torch.from_numpy(target_r.astype(np.float32)),
+            torch.from_numpy(model_points.astype(np.float32)),
+            torch.LongTensor([obj]),
+            torch.from_numpy(gt_t.astype(np.float32))
+        ]
+
+        if self.mode == 'train':
+            return ret
+
+        elif self.mode == 'projection':
+            ret.extend([instance_path, K, np.array(img)])
+            return ret
+
+        elif self.mode == 'teacher':
+            ret = [
+                torch.from_numpy(cloud.astype(np.float32)),
+                torch.LongTensor(choose.astype(np.int32)),
+                self.transform(img_masked),
+                torch.from_numpy(model_points.astype(np.float32)),
+                torch.LongTensor([obj]),
+                torch.from_numpy(gt_t.astype(np.float32)),
+                instance_path, 
+                K, 
+                img.shape, 
+                (rmin, rmax, cmin, cmax), 
+                mask_label[rmin:rmax, cmin:cmax]
+            ]
+            return ret
+
+        elif self.mode == 'student':
+            ret.extend([])
+            return ret
 
     def __len__(self):
         return self.length
