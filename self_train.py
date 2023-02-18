@@ -33,6 +33,10 @@ parser.add_argument('--iter_start', type=int, default=0, help='the start number 
 parser.add_argument('--best_metric', type=float, default=100000.0)
 parser.add_argument('--iter', type=int, default=50, help='the total number of iterations for self-training')
 parser.add_argument('--validation', action='store_true', default=False, help='valid the real model with a small number of real data')
+parser.add_argument('--dataset', type=str, default='./data_real_new.hdf5')
+parser.add_argument('--split_dir', type=str, default='./split')
+parser.add_argument('--split_file', type=str, default='eval_on_real.txt')
+
 opt = parser.parse_args()
 
 opt.num_objects = 10  # number of object classes in the dataset
@@ -40,7 +44,7 @@ opt.num_points = 500 # number of points selected from mask
 opt.num_rot = 60
 
 
-def self_training_with_real_data(iter_idx, root_dir, args, estimator_best_test = np.Inf):
+def self_training_with_real_data(iter_idx, root_dir, args, estimator_best_test=np.Inf):
     # set seed
 
     """
@@ -55,29 +59,20 @@ def self_training_with_real_data(iter_idx, root_dir, args, estimator_best_test =
                             | pose_model_{epoch}_{dis}.pth
     """
     
-    curr_dir = os.path.join(root_dir, f'iteration_{iter_idx:02}')  # folder to save trained models
-    os.makedirs(curr_dir, exist_ok=True)
-    os.makedirs(curr_log_dir, exist_ok=True)
+    iteration_dir = os.path.join(root_dir, f'iteration_{iter_idx:02}')  # folder to save trained models
+    os.makedirs(iteration_dir, exist_ok=True)
 
     estimator = PoseNet(num_points=opt.num_points, num_obj=opt.num_objects, num_rot=opt.num_rot)
     estimator.cuda()
-    if iter_idx == 0:
-        prev_model_path = os.path.join(root_dir, 'initial', 'model.pth')
-    else:
-        prev_model_path = os.path.join(root_dir, f'iteration_{iter_idx-1:02}', 'model.pth')
-    estimator.load_state_dict(torch.load(prev_model_path))
+    teacher_path = os.path.join(iteration_dir, 'best', 'best.pth')
+    estimator.load_state_dict(torch.load(teacher_path))
 
-    dataset_root = './data_real_new.hdf5'
-    label_root = os.path.join(curr_dir, 'teacher_labels.hdf5')
-    split_dir = os.path.join(curr_dir, 'good_instances')
-    split_file = 'good_instances.txt'
+    label_root = os.path.join(iteration_dir, 'teacher_labels.hdf5')
+    split_dir = os.path.join(iteration_dir, 'good_instances')
     
-    dataset = PoseDataset('student_train', opt.num_points, True, dataset_root, opt.noise_trans, split_dir, split_file, label_root)
+    dataset = PoseDataset('student', opt.num_points, True, opt.dataset, opt.noise_trans, split_dir, 'train.txt', label_root)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=opt.batch_size, shuffle=True, num_workers=10)
-    
-    test_split_dir = './split_self-training_test'
-    test_split_file = 'test.txt'
-    test_dataset = PoseDataset('student_test', opt.num_points, False, dataset_root, 0.0, test_split_dir, test_split_file)
+    test_dataset = PoseDataset('student', opt.num_points, False, opt.dataset, 0.0, split_dir, 'test.txt', label_root)
     test_dataloader = torch.utils.data.DataLoader(test_dataset, batch_size=opt.batch_size, shuffle=False, num_workers=10)
     
     opt.sym_list = dataset.get_sym_list()
@@ -96,7 +91,7 @@ def self_training_with_real_data(iter_idx, root_dir, args, estimator_best_test =
     st_time = time.time()
     best_test = estimator_best_test
     for epoch in range(opt.nepoch):
-        logger = setup_logger(f'iter_{iter_idx}_epoch_{epoch}_train', os.path.join(curr_dir, f'iter_{iter_idx}_epoch_{epoch}_train.txt'))
+        logger = setup_logger(f'iter_{iter_idx}_epoch_{epoch}_train', os.path.join(iteration_dir, f'iter_{iter_idx}_epoch_{epoch}_train.txt'))
         logger.info('Train time {0}'.format(time.strftime("%Hh %Mm %Ss", time.gmtime(time.time() - st_time)) + ', ' + 'Training started'))
         train_count = 0
         train_loss_avg = 0.0
@@ -106,7 +101,7 @@ def self_training_with_real_data(iter_idx, root_dir, args, estimator_best_test =
         estimator.train()
         optimizer.zero_grad()
         for i, data in enumerate(dataloader):
-            points, choose, img, target_t, target_r, model_points, idx, gt_t = data  # todo
+            points, choose, img, target_t, target_r, model_points, idx, gt_t = data
             obj_diameter = opt.diameters[idx.item()]
             points, choose, img, target_t, target_r, model_points, idx = Variable(points).cuda(), \
                                                                             Variable(choose).cuda(), \
@@ -138,7 +133,7 @@ def self_training_with_real_data(iter_idx, root_dir, args, estimator_best_test =
 
         print('>>>>>>>>----------epoch {0} train finish---------<<<<<<<<'.format(epoch))
 
-        logger = setup_logger(f'iter_{iter_idx}_epoch_{epoch}_test', os.path.join(curr_dir, f'iter_{iter_idx}_epoch_{epoch}_test.txt'))
+        logger = setup_logger(f'iter_{iter_idx}_epoch_{epoch}_test', os.path.join(iteration_dir, f'iter_{iter_idx}_epoch_{epoch}_test.txt'))
         logger.info('Test time {0}'.format(time.strftime("%Hh %Mm %Ss", time.gmtime(time.time() - st_time)) + ', ' + 'test started'))
         test_dis = 0.0
         test_count = 0
@@ -196,12 +191,12 @@ def self_training_with_real_data(iter_idx, root_dir, args, estimator_best_test =
         test_dis = test_dis / test_count
         # log results
         logger.info('Test time {0} Epoch {1} TEST FINISH Avg dis: {2:f}, Accuracy: {3:f}'.format(time.strftime("%Hh %Mm %Ss",
-            time.gmtime(time.time() - st_time)), epoch, test_dis, accuracy))        
+            time.gmtime(time.time() - st_time)), epoch, test_dis, accuracy))      
+        torch.save(estimator.state_dict(), '{0}/pose_model_{1}_{2}.pth'.format(iteration_dir, epoch, test_dis))  
         if test_dis < best_test:
             best_test = test_dis
-            torch.save(estimator.state_dict(), '{0}/pose_model_{1}_{2}.pth'.format(curr_dir, epoch, test_dis))
             torch.save(estimator.state_dict(), '{0}/best/best_model.pth'.format(root_dir))
-            with open('{0}/best/best_model.txt'.format(root_dir), 'a') as f:
+            with open('{0}/best/record.txt'.format(root_dir), 'a') as f:
                 f.write(f'{time.strftime("%Hh %Mm %Ss", time.gmtime(time.time()-st_time))}: iter {iter_idx}, epoch {epoch}, test dist {test_dis}\n')
             logger.info('%d >>>>>>>>----------BEST TEST MODEL SAVED---------<<<<<<<<' % epoch)
 
@@ -226,7 +221,7 @@ def iterative_self_training(start_iterations, num_iterations):
             # get trained virtual model
             shutil.copy(opt.initial_model, os.path.join(out_dir, 'best', 'best_model.pth'))
             shutil.copy(opt.initial_model, os.path.join(out_dir, 'best', 'initial_model.pth'))
-            with open(os.path.join(out_dir, 'best', 'record_model.txt'), 'w') as f:
+            with open(os.path.join(out_dir, 'best', 'record.txt'), 'w') as f:
                 f.write(f'Initial model: {opt.initial_model}\n')
 
             print(f'Initial model is: {opt.initial_model}')

@@ -8,12 +8,13 @@ import torchvision.transforms as transforms
 import torch.utils.data as data
 import open3d as o3d
 import h5py
+import os
 
 image_height = 400
 image_width = 640
 
 class PoseDataset(data.Dataset):
-    def __init__(self, mode, num, add_noise, root, noise_trans, split_root, split_file, label_root):
+    def __init__(self, mode, num, add_noise, root, noise_trans, split_root, split_file, label_dir=''):
         """
         mode: train, projection, teacher, student
         """
@@ -35,6 +36,9 @@ class PoseDataset(data.Dataset):
         ]
 
         self.mode = mode
+        if self.mode == 'student':
+            self.label_dir = label_dir
+
         self.cam_scale = 1000.0
         self.depth_scale = 22.0  # to change
 
@@ -45,14 +49,13 @@ class PoseDataset(data.Dataset):
         self.diameters = {}
 
         item_count = 0
+        # collect index
         for item in self.objlist:
             file_name =  os.path.join(self.split_root, item, split_file)
             if not os.path.isfile(file_name):
                 print(f'The split list of part {item} does not exist! Skipped.')
                 continue
-
             input_file = open(file_name, 'r')
-
             while 1:
                 item_count += 1
                 input_line = input_file.readline()
@@ -64,6 +67,7 @@ class PoseDataset(data.Dataset):
                 self.list_obj.append(self.objlist.index(item))
                 self.list_rank.append(input_line)
                 self.list_image.append(input_line[:input_line.rfind('/')])
+            input_file.close()
 
             # read pcd
             model_path = f'{self.model_root}/{item}.master.ply'
@@ -127,9 +131,18 @@ class PoseDataset(data.Dataset):
         meta = h[self.list_rank[index]]
         rmin, rmax, cmin, cmax = get_bbox(meta)  # choose predifined box size 
         img_masked = img[rmin:rmax, cmin:cmax, :3]
-        
-        target_r = np.resize(np.array(meta['R']), (3, 3))
-        target_t = np.array(meta['t']) / self.cam_scale
+
+        if self.mode == 'student':
+            h_label = h5py.File(self.label_dir, 'r')
+            R_t = h[self.list_rank[index]]
+            target_r = np.array(R_t['R'])
+            target_t = np.array(R_t['t']) / self.cam_scale
+            h_label.close()
+        elif self.mode =='teacher':
+            pass
+        else:
+            target_r = np.array(meta['R'])
+            target_t = np.array(meta['t']) / self.cam_scale
 
         choose = mask[rmin:rmax, cmin:cmax].flatten().nonzero()[0]  # valid index in the box
         # return all zero vector if there is no valid point
@@ -159,61 +172,72 @@ class PoseDataset(data.Dataset):
         if self.add_noise:
             # shift
             add_t = np.random.uniform(-self.noise_trans, self.noise_trans, (1, 3))
-            target_t = target_t + add_t
+            if self.mode == 'teacher':
+                pass
+            else:
+                target_t = target_t + add_t
             # jittering
             add_t = add_t + np.clip(0.001*np.random.randn(cloud.shape[0], 3), -0.005, 0.005)
             cloud = np.add(cloud, add_t)
         # position target
-        gt_t = target_t
-        target_t = target_t - cloud  # relative vectors from depth point to target center 
-        target_t = target_t / np.linalg.norm(target_t, axis=1)[:, None]  # normalize
+        if self.mode == 'teacher':
+            pass
+        else:
+            gt_t = target_t
+            target_t = target_t - cloud  # relative vectors from depth point to target center 
+            target_t = target_t / np.linalg.norm(target_t, axis=1)[:, None]  # normalize
 
         # rotation target
         model_points = self.pt[self.objlist[obj]] / self.cam_scale
         dellist = [j for j in range(0, len(model_points))]
         dellist = random.sample(dellist, len(model_points) - self.num_pt_mesh)
         model_points = np.delete(model_points, dellist, axis=0)
-        target_r = np.dot(model_points, target_r.T)
+
+        if self.mode == 'teacher':
+            pass
+        else:
+            target_r = np.dot(model_points, target_r.T)
 
         h.close()
 
-        ret = [
-            torch.from_numpy(cloud.astype(np.float32)),
-            torch.LongTensor(choose.astype(np.int32)),
-            self.transform(img_masked),
-            torch.from_numpy(target_t.astype(np.float32)),
-            torch.from_numpy(target_r.astype(np.float32)),
-            torch.from_numpy(model_points.astype(np.float32)),
-            torch.LongTensor([obj]),
-            torch.from_numpy(gt_t.astype(np.float32))
-        ]
-
-        if self.mode == 'train':
-            return ret
-
-        elif self.mode == 'projection':
-            ret.extend([instance_path, K, np.array(img)])
-            return ret
-
-        elif self.mode == 'teacher':
+        if self.mode == 'teacher':
+            # no target_R, target_t and gt_t
             ret = [
                 torch.from_numpy(cloud.astype(np.float32)),
                 torch.LongTensor(choose.astype(np.int32)),
                 self.transform(img_masked),
                 torch.from_numpy(model_points.astype(np.float32)),
                 torch.LongTensor([obj]),
-                torch.from_numpy(gt_t.astype(np.float32)),
                 instance_path, 
                 K, 
-                img.shape, 
-                (rmin, rmax, cmin, cmax), 
+                img.shape[:2], 
+                torch.tensor([rmin, rmax, cmin, cmax], dtype=int), 
                 mask_label[rmin:rmax, cmin:cmax]
             ]
             return ret
 
-        elif self.mode == 'student':
-            ret.extend([])
-            return ret
+        else:
+            ret = [
+                torch.from_numpy(cloud.astype(np.float32)),
+                torch.LongTensor(choose.astype(np.int32)),
+                self.transform(img_masked),
+                torch.from_numpy(target_t.astype(np.float32)),
+                torch.from_numpy(target_r.astype(np.float32)),
+                torch.from_numpy(model_points.astype(np.float32)),
+                torch.LongTensor([obj]),
+                torch.from_numpy(gt_t.astype(np.float32))
+            ]
+
+            if self.mode == 'train':
+                return ret
+
+            elif self.mode == 'projection':
+                ret.extend([instance_path, K, np.array(img)])
+                return ret
+
+            elif self.mode == 'student':
+                ret.extend([])
+                return ret
 
     def __len__(self):
         return self.length
@@ -226,6 +250,9 @@ class PoseDataset(data.Dataset):
 
     def get_diameter(self):
         return self.diameters
+        
+    def get_pcd_list(self):
+        return self.pt
 
     def get_part_list(self):
         return self.objlist

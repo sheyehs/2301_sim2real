@@ -11,7 +11,6 @@ from lib.network import PoseNet
 from lib.loss import Loss
 from lib.ransac_voting.ransac_voting_gpu import ransac_voting_layer
 from lib.transformations import quaternion_matrix
-from lib.knn.__init__ import KNearestNeighbor
 from lib.utils import setup_logger
 
 parser = argparse.ArgumentParser()
@@ -65,7 +64,6 @@ def main():
     estimator.cuda()
     # loss
     criterion = Loss(opt.sym_list, estimator.rot_anchors)
-    knn = KNearestNeighbor(1)
     # learning rate decay
     best_test = np.Inf
     opt.first_decay_start = False
@@ -162,7 +160,8 @@ def main():
                                                                          Variable(target_r).cuda(), \
                                                                          Variable(model_points).cuda(), \
                                                                          Variable(idx).cuda()
-            pred_r, pred_t, pred_c = estimator(img, points, choose, idx)
+            with torch.no_grad():
+                pred_r, pred_t, pred_c = estimator(img, points, choose, idx)
             loss, _, _, _ = criterion(pred_r, pred_t, pred_c, target_r, target_t, model_points, idx, obj_diameter)
             test_count += 1
             # evalaution

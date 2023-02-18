@@ -13,7 +13,8 @@ class KNearestNeighbor(Function):
     def __init__(self, k):
         self.k = k
 
-    def forward(self, ref, query):
+    @staticmethod
+    def forward(self, ref, query, k):
         """
         Args:
             ref: b x dim x n_ref
@@ -21,7 +22,7 @@ class KNearestNeighbor(Function):
         """
         ref = ref.contiguous().float().cuda()
         query = query.contiguous().float().cuda()
-        inds = torch.empty(query.shape[0], self.k, query.shape[2]).long().cuda()
+        inds = torch.empty(query.shape[0], k, query.shape[2]).long().cuda()
 
         knn_pytorch.knn(ref, query, inds)
 
