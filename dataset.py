@@ -14,85 +14,74 @@ image_height = 400
 image_width = 640
 
 class PoseDataset(data.Dataset):
-    def __init__(self, mode, num, add_noise, root, noise_trans, split_root, split_file, label_dir=''):
+    def __init__(self, mode, opt, split_file, add_noise: bool, noise_trans):
         """
-        mode: train, projection, teacher, student
+        mode: train, test, eval, teacher, student
         """
-        self.root = root
-        self.split_root = split_root
+        self.mode = mode
+        self.dataset_path = opt.dataset_path
+        self.split_dir = opt.split_dir
+        self.split_file = split_file
         self.model_root = './models'
 
-        self.objlist = [
-            'SF-CJd60-097-016-016',
-            'SF-CJd60-097-026',
-            'SongFeng_0005',
-            'SongFeng_306',
-            'SongFeng_311',
-            'SongFeng_318',
-            'SongFeng_332',
-            '21092302',
-            '6010018CSV',
-            '6010022CSV'
-        ]
+        self.part = opt.part
 
-        self.mode = mode
+        
+        print("Dataset mode is:", self.mode)
         if self.mode == 'student':
             self.label_dir = label_dir
 
         self.cam_scale = 1000.0
-        self.depth_scale = 22.0  # to change
+        self.depth_scale = 22.0  # to do: change
 
         self.list_image = []
-        self.list_obj = []  # part index
-        self.list_rank = []  # instance number
-        self.pt = {}
-        self.diameters = {}
+        self.list_path = []  # instance number
+        self.pt = None
+        self.diameters = None
 
         item_count = 0
         # collect index
-        for item in self.objlist:
-            file_name =  os.path.join(self.split_root, item, split_file)
-            if not os.path.isfile(file_name):
-                print(f'The split list of part {item} does not exist! Skipped.')
-                continue
-            input_file = open(file_name, 'r')
-            while 1:
-                item_count += 1
-                input_line = input_file.readline()
-                if not input_line:
-                    break
-                if input_line[-1:] == '\n':
-                    input_line = input_line[:-1]
+        file_name =  os.path.join(self.split_dir, self.part, split_file)
+        if not os.path.isfile(file_name):
+            print(f'The split list of part {self.part} does not exist! Skipped.')
+            return
+        input_file = open(file_name, 'r')
+        while 1:
+            item_count += 1
+            input_line = input_file.readline()
+            if not input_line:
+                break
+            if input_line[-1:] == '\n':
+                input_line = input_line[:-1]
 
-                self.list_obj.append(self.objlist.index(item))
-                self.list_rank.append(input_line)
-                self.list_image.append(input_line[:input_line.rfind('/')])
-            input_file.close()
+            self.list_path.append(input_line)
+            self.list_image.append(input_line[:input_line.rfind('/')])
+        input_file.close()
 
-            # read pcd
-            model_path = f'{self.model_root}/{item}.master.ply'
-            print('extract model point cloud from:', model_path)
-            pcd = o3d.io.read_point_cloud(model_path)
-            pcd = np.array(pcd.points)
-            print('point cloud shape:', pcd.shape)
-            self.pt[item] = pcd
+        # read pcd
+        model_path = f'{self.model_root}/{self.part}.master.ply'
+        print('extract model point cloud from:', model_path)
+        pcd = o3d.io.read_point_cloud(model_path)
+        pcd = np.array(pcd.points)
+        print('point cloud shape:', pcd.shape)
+        self.pt = pcd
 
-            # read diameter
-            with open(f'{self.model_root}/diameters.yml', 'r') as meta_file:
-                model_info = yaml.safe_load(meta_file)
-                diameter = float(model_info[item]) / self.cam_scale
-                print(f'read {item} diameter {diameter} m.')
-                self.diameters[self.objlist.index(item)] = diameter
+        # read diameter
+        with open(f'{self.model_root}/diameters.yml', 'r') as meta_file:
+            model_info = yaml.safe_load(meta_file)
+            diameter = float(model_info[self.part]) / self.cam_scale
+            print(f'read {self.part} diameter {diameter} m.')
+            self.diameter = diameter
 
-            print('Object {0} buffer loaded'.format(item))
+        print('Object {0} buffer loaded'.format(self.part))
 
-        self.length = len(self.list_rank)
+        self.length = len(self.list_path)
 
         self.xmap = np.array([[i for i in range(image_width)] for j in range(image_height)])
         self.ymap = np.array([[j for i in range(image_width)] for j in range(image_height)])
         
-        self.num = num  # number of points for predicting t
-        self.num_pt_mesh = 500  # number of points for evaluating R
+        self.num = opt.num_depth_pixels  # number of points for predicting t
+        self.num_pt_mesh = opt.num_mesh_points  # number of points for evaluating R
         self.symmetry_obj_idx = []
 
         self.add_noise = add_noise
@@ -104,14 +93,13 @@ class PoseDataset(data.Dataset):
         
 
     def __getitem__(self, index):
-        obj = self.list_obj[index]  # 0, 1, 2 ...
-        instance_path = self.list_rank[index]  # image_instance
+        instance_path = self.list_path[index]  # image_instance
 
-        h = h5py.File(self.root, 'r')
+        h = h5py.File(self.dataset_path, 'r')
 
         img = Image.fromarray(np.array(h[f'{self.list_image[index]}/color']))  
         depth = np.array(h[f'{self.list_image[index]}/depth'])
-        label = np.array(h[f'{self.list_rank[index]}/mask'])
+        label = np.array(h[f'{self.list_path[index]}/mask'])
           
         K = np.array(h[f'{self.list_image[index]}/K'])
         cam_fx = K[0][0]
@@ -128,15 +116,16 @@ class PoseDataset(data.Dataset):
             img = self.trancolor(img)
         img = np.array(img)
 
-        meta = h[self.list_rank[index]]
+        meta = h[self.list_path[index]]
         rmin, rmax, cmin, cmax = get_bbox(meta)  # choose predifined box size 
         img_masked = img[rmin:rmax, cmin:cmax, :3]
 
         if self.mode == 'student':
             h_label = h5py.File(self.label_dir, 'r')
-            R_t = h[self.list_rank[index]]
+            R_t = h_label[self.list_path[index]]
             target_r = np.array(R_t['R'])
             target_t = np.array(R_t['t']) / self.cam_scale
+            target_t = target_t.transpose()
             h_label.close()
         elif self.mode =='teacher':
             pass
@@ -172,7 +161,7 @@ class PoseDataset(data.Dataset):
         if self.add_noise:
             # shift
             add_t = np.random.uniform(-self.noise_trans, self.noise_trans, (1, 3))
-            if self.mode == 'teacher':
+            if self.mode == 'teacher':  # no target_t
                 pass
             else:
                 target_t = target_t + add_t
@@ -188,7 +177,7 @@ class PoseDataset(data.Dataset):
             target_t = target_t / np.linalg.norm(target_t, axis=1)[:, None]  # normalize
 
         # rotation target
-        model_points = self.pt[self.objlist[obj]] / self.cam_scale
+        model_points = self.pt / self.cam_scale
         dellist = [j for j in range(0, len(model_points))]
         dellist = random.sample(dellist, len(model_points) - self.num_pt_mesh)
         model_points = np.delete(model_points, dellist, axis=0)
@@ -216,7 +205,7 @@ class PoseDataset(data.Dataset):
             ]
             return ret
 
-        else:
+        elif self.mode == 'train' or self.mode == 'test' or self.mode == 'student':
             ret = [
                 torch.from_numpy(cloud.astype(np.float32)),
                 torch.LongTensor(choose.astype(np.int32)),
@@ -224,20 +213,24 @@ class PoseDataset(data.Dataset):
                 torch.from_numpy(target_t.astype(np.float32)),
                 torch.from_numpy(target_r.astype(np.float32)),
                 torch.from_numpy(model_points.astype(np.float32)),
-                torch.LongTensor([obj]),
                 torch.from_numpy(gt_t.astype(np.float32))
             ]
+            return ret
 
-            if self.mode == 'train':
-                return ret
-
-            elif self.mode == 'projection':
-                ret.extend([instance_path, K, np.array(img)])
-                return ret
-
-            elif self.mode == 'student':
-                ret.extend([])
-                return ret
+        elif self.mode == 'eval':  # need pass K and image to prject pred points onto
+            ret = [
+                torch.from_numpy(cloud.astype(np.float32)),
+                torch.LongTensor(choose.astype(np.int32)),
+                self.transform(img_masked),
+                torch.from_numpy(target_r.astype(np.float32)),
+                torch.from_numpy(model_points.astype(np.float32)),
+                torch.LongTensor([obj]),
+                torch.from_numpy(gt_t.astype(np.float32)),
+                instance_path,
+                K,
+                np.array(img)
+            ]
+            return ret
 
     def __len__(self):
         return self.length
@@ -249,13 +242,10 @@ class PoseDataset(data.Dataset):
         return self.num_pt_mesh
 
     def get_diameter(self):
-        return self.diameters
+        return self.diameter
         
     def get_pcd_list(self):
         return self.pt
-
-    def get_part_list(self):
-        return self.objlist
 
 
 def get_bbox(meta):

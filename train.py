@@ -13,101 +13,88 @@ from lib.ransac_voting.ransac_voting_gpu import ransac_voting_layer
 from lib.transformations import quaternion_matrix
 from lib.utils import setup_logger
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--dataset', type=str, default='robotics')
-parser.add_argument('--split_dir', type=str, default='./split')
-parser.add_argument('--gpu_id', type=str, default='0', help='GPU id')
-parser.add_argument('--num_rot', type=int, default=60, help='number of rotation anchors')
-parser.add_argument('--batch_size', type=int, default=8, help='batch size')
-parser.add_argument('--workers', type=int, default=10, help='number of data loading workers')
-parser.add_argument('--noise_trans', default=0.01, help='random noise added to translation')
-parser.add_argument('--lr', type=float, default=0.0001, help='learning rate')
-parser.add_argument('--start_epoch', type=int, default=1, help='which epoch to start')
-parser.add_argument('--resume_posenet', type=str, default='', help='resume PoseNet model')
-parser.add_argument('--nepoch', type=int, default=100, help='max number of epochs to train')
-opt = parser.parse_args()
+def options():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--split_dir', type=str, default='./split')
+    parser.add_argument('--part', type=str, help='part name')
+    parser.add_argument('--gpu_id', type=str, default='0', help='GPU id')
+    parser.add_argument('--batch_size', type=int, default=8, help='batch size')
+    parser.add_argument('--workers', type=int, default=10, help='number of data loading workers')
+    parser.add_argument('--noise_trans', default=0.01, help='random noise added to translation')
+    parser.add_argument('--lr', type=float, default=0.0001, help='learning rate')
+    parser.add_argument('--nepoch', type=int, default=50, help='max number of epochs to train')
+    return parser.parse_args()
 
+def main(opt):
+    seed = random.randint(1, 10000)
+    random.seed(seed)
+    torch.manual_seed(seed)
+    os.environ['CUDA_VISIBLE_DEVICES'] = opt.gpu_id
 
-def main():
-    opt.manualSeed = random.randint(1, 10000)
-    random.seed(opt.manualSeed)
-    torch.manual_seed(opt.manualSeed)
-    if opt.dataset == 'robotics':
-        opt.dataset_root = './data.hdf5'
-        opt.num_objects = 10 
-        opt.num_points = 500
-        opt.result_dir = f'results/{time.strftime("%m%d")}_lr_{opt.lr}'
-        opt.repeat_epoch = 3  # 10
-    else:
-        print('unknown dataset')
-        return
-    if opt.dataset == 'robotics':
-        dataset = PoseDataset('train', opt.num_points, True, opt.dataset_root, opt.noise_trans, opt.split_dir, 'train.txt')
-        test_dataset = PoseDataset('test', opt.num_points, False, opt.dataset_root, 0.0, opt.split_dir, 'test.txt')
+    opt.dataset_path = './data.hdf5'
+    opt.num_objects = 1
+    opt.result_dir = f'results/{time.strftime("%m%d_%H%M")}_{opt.part}_lr_{opt.lr}'
+    opt.repeat_epoch = 1  # 10
+    opt.num_rot = 60
+    opt.num_depth_pixels = 500
+    opt.num_mesh_points = 500
+    opt.split_train_file = 'train.txt'
+    opt.split_test_file = 'test.txt'
+
+    dataset = PoseDataset('train', opt, opt.split_train_file, True, opt.noise_trans)
+    test_dataset = PoseDataset('test', opt, opt.split_test_file, False, 0.0)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=True, num_workers=opt.workers)
     testdataloader = torch.utils.data.DataLoader(test_dataset, batch_size=1, shuffle=False, num_workers=opt.workers)
-    opt.sym_list = dataset.get_sym_list()
-    opt.num_points_mesh = dataset.get_num_points_mesh()
-    opt.diameters = dataset.get_diameter()
+
+    sym_list = dataset.get_sym_list()
+    diameter = dataset.get_diameter()
+
     print('>>>>>>>>----------Dataset loaded!---------<<<<<<<<')
     print('length of the training set: {0}'.format(len(dataset)))
     print('length of the testing set: {0}'.format(len(test_dataset)))
-    print('number of sample points on mesh: {0}'.format(opt.num_points_mesh))
-    print('symmetrical object list: {0}'.format(opt.sym_list))
+    print('number of sample points on mesh: {0}'.format(opt.num_mesh_points))
+    print('symmetrical object list: {0}'.format(sym_list))
 
-    if not os.path.exists(opt.result_dir):
-        os.makedirs(opt.result_dir)
-    writer = SummaryWriter(opt.result_dir)  # tb_writer = tf.summary.create_file_writer(opt.result_dir)
-    os.environ['CUDA_VISIBLE_DEVICES'] = opt.gpu_id
+    os.makedirs(opt.result_dir, exist_ok=True)
+    writer = SummaryWriter(opt.result_dir) 
+    
     # network
-    estimator = PoseNet(num_points=opt.num_points, num_obj=opt.num_objects, num_rot=opt.num_rot)
+    estimator = PoseNet(num_points=opt.num_depth_pixels, num_obj=opt.num_objects, num_rot=opt.num_rot)
     estimator.cuda()
     # loss
-    criterion = Loss(opt.sym_list, estimator.rot_anchors)
+    criterion = Loss(sym_list, estimator.rot_anchors)
     # learning rate decay
     best_test = np.Inf
     opt.first_decay_start = False
     opt.second_decay_start = False
-    # if resume training
-    if opt.resume_posenet != '':
-        estimator.load_state_dict(torch.load(opt.resume_posenet))
-        model_name_parsing = (opt.resume_posenet.split('.')[0]).split('_')
-        best_test = float(model_name_parsing[-1])
-        opt.start_epoch = int(model_name_parsing[-2]) + 1
-        if best_test < 0.016 and not opt.first_decay_start:
-            opt.first_decay_start = True
-            opt.lr *= 0.6
-        if best_test < 0.013 and not opt.second_decay_start:
-            opt.second_decay_start = True
-            opt.lr *= 0.5
     # optimizer
     optimizer = torch.optim.Adam(estimator.parameters(), lr=opt.lr)
-    global_step = (len(dataset) // opt.batch_size) * opt.repeat_epoch * (opt.start_epoch - 1)
+    global_step = 0
+    idx = torch.tensor([0], dtype=int).cuda()
     # train
     st_time = time.time()
-    for epoch in range(opt.start_epoch, opt.nepoch):
+    for epoch in range(opt.nepoch):
         logger = setup_logger('epoch%02d' % epoch, os.path.join(opt.result_dir, 'epoch_%02d_train_log.txt' % epoch))
         logger.info('Train time {0}'.format(time.strftime("%Hh %Mm %Ss", time.gmtime(time.time() - st_time)) + ', ' + 'Training started'))
+        estimator.train()
         train_count = 0
         train_loss_avg = 0.0
         train_loss_r_avg = 0.0
         train_loss_t_avg = 0.0
         train_loss_reg_avg = 0.0
-        estimator.train()
         optimizer.zero_grad()
         for rep in range(opt.repeat_epoch):
-            for i, data in enumerate(dataloader, 0):
-                points, choose, img, target_t, target_r, model_points, idx, gt_t = data
-                obj_diameter = opt.diameters[idx.item()]
-                points, choose, img, target_t, target_r, model_points, idx = Variable(points).cuda(), \
+            for i, data in enumerate(dataloader):
+                points, choose, img, target_t, target_r, model_points, gt_t = data
+                points, choose, img, target_t, target_r, model_points = Variable(points).cuda(), \
                                                                              Variable(choose).cuda(), \
                                                                              Variable(img).cuda(), \
                                                                              Variable(target_t).cuda(), \
                                                                              Variable(target_r).cuda(), \
                                                                              Variable(model_points).cuda(), \
-                                                                             Variable(idx).cuda()
+
                 pred_r, pred_t, pred_c = estimator(img, points, choose, idx)
-                loss, loss_r, loss_t, loss_reg = criterion(pred_r, pred_t, pred_c, target_r, target_t, model_points, idx, obj_diameter)
+                loss, loss_r, loss_t, loss_reg = criterion(pred_r, pred_t, pred_c, target_r, target_t, model_points, idx, diameter)
                 # torch.cuda.empty_cache()
                 loss.backward()
                 train_loss_avg += loss.item()
@@ -117,14 +104,12 @@ def main():
                 train_count += 1
                 if train_count % opt.batch_size == 0:
                     global_step += 1
-                    lr = opt.lr
                     optimizer.step()
                     optimizer.zero_grad()
                     # write results to tensorboard
                     writer.add_scalars(
-                        "log",
-                        {
-                            'learning_rate': lr,
+                        "log", {
+                            'learning_rate': opt.lr,
                             'loss': train_loss_avg / opt.batch_size,
                             'loss_r': train_loss_r_avg / opt.batch_size,
                             'loss_t': train_loss_t_avg / opt.batch_size,
@@ -144,36 +129,37 @@ def main():
 
         logger = setup_logger('epoch%02d_test' % epoch, os.path.join(opt.result_dir, 'epoch_%02d_test_log.txt' % epoch))
         logger.info('Test time {0}'.format(time.strftime("%Hh %Mm %Ss", time.gmtime(time.time() - st_time)) + ', ' + 'Testing started'))
+        estimator.eval()
         test_dis = 0.0
         test_count = 0
-        estimator.eval()
-        success_count = [0 for i in range(opt.num_objects)]
-        num_count = [0 for i in range(opt.num_objects)]
+        success_count = np.zeros(4, dtype=int)
 
-        for j, data in enumerate(testdataloader, 0):
-            points, choose, img, target_t, target_r, model_points, idx, gt_t = data
-            obj_diameter = opt.diameters[idx.item()]
-            points, choose, img, target_t, target_r, model_points, idx = Variable(points).cuda(), \
+        for j, data in enumerate(testdataloader):
+            points, choose, img, target_t, target_r, model_points, gt_t = data
+            points, choose, img, target_t, target_r, model_points = Variable(points).cuda(), \
                                                                          Variable(choose).cuda(), \
                                                                          Variable(img).cuda(), \
                                                                          Variable(target_t).cuda(), \
                                                                          Variable(target_r).cuda(), \
                                                                          Variable(model_points).cuda(), \
-                                                                         Variable(idx).cuda()
+
             with torch.no_grad():
                 pred_r, pred_t, pred_c = estimator(img, points, choose, idx)
-            loss, _, _, _ = criterion(pred_r, pred_t, pred_c, target_r, target_t, model_points, idx, obj_diameter)
-            test_count += 1
+            loss, _, _, _ = criterion(pred_r, pred_t, pred_c, target_r, target_t, model_points, idx, diameter)
             # evalaution
             how_min, which_min = torch.min(pred_c, 1)
             pred_r = pred_r[0][which_min[0]].view(-1).cpu().data.numpy()
             pred_r = quaternion_matrix(pred_r)[:3, :3]
-            pred_t, pred_mask = ransac_voting_layer(points, pred_t)
+            try:
+                pred_t, pred_mask = ransac_voting_layer(points, pred_t)
+            except:
+                print("RANSAC failed. Skipped.")
+                continue
             pred_t = pred_t.cpu().data.numpy()
             model_points = model_points[0].cpu().detach().numpy()
             pred = np.dot(model_points, pred_r.T) + pred_t
             target = target_r[0].cpu().detach().numpy() + gt_t[0].cpu().data.numpy()
-            if idx[0].item() in opt.sym_list:
+            if idx[0].item() in sym_list:
                 pred = torch.from_numpy(pred.astype(np.float32)).cuda().transpose(1, 0).contiguous()
                 target = torch.from_numpy(target.astype(np.float32)).cuda().transpose(1, 0).contiguous()
                 inds = knn(target.unsqueeze(0), pred.unsqueeze(0))
@@ -183,32 +169,36 @@ def main():
                 dis = np.mean(np.linalg.norm(pred - target, axis=1))
             logger.info('Test time {0} Test Frame No.{1} loss:{2:f} confidence:{3:f} distance:{4:f}'.format(
                 time.strftime("%Hh %Mm %Ss", time.gmtime(time.time() - st_time)), test_count, loss, how_min[0].item(), dis))
-            if dis < 0.1 * opt.diameters[idx.item()]:
-                success_count[idx[0].item()] += 1
-            num_count[idx[0].item()] += 1
+            error_ratio = dis / diameter
+            cond = [error_ratio < 0.05, error_ratio < 0.1, error_ratio < 0.2, error_ratio < 0.5] 
+            success_count[cond] += 1
+            test_count += 1
             test_dis += dis
         # compute accuracy
-        accuracy = 0.0
-        for i in range(opt.num_objects):
-            accuracy += float(success_count[i]) / num_count[i]
-            logger.info('Object {0} success rate: {1}'.format(test_dataset.objlist[i], float(success_count[i]) / num_count[i]))
-        accuracy = accuracy / opt.num_objects
-        test_dis = test_dis / test_count
+        accuracy = success_count / test_count
+        test_dis = test_dis / test_count        
         # log results
-        logger.info('Test time {0} Epoch {1} TEST FINISH Avg dis: {2:f}, Accuracy: {3:f}'.format(time.strftime("%Hh %Mm %Ss",
-            time.gmtime(time.time() - st_time)), epoch, test_dis, accuracy))
+        logger.info('')
+        logger.info('Test time {0} Epoch {1} {2} TEST FINISH '.format(time.strftime("%Hh %Mm %Ss",
+            time.gmtime(time.time() - st_time)), epoch, opt.part))
+        logger.info(f'accuracy of 0.05 diameter: {accuracy[0]}')
+        logger.info(f'accuracy of 0.1 diameter: {accuracy[1]}')
+        logger.info(f'accuracy of 0.2 diameter: {accuracy[2]}')
+        logger.info(f'accuracy of 0.5 diameter: {accuracy[3]}')
+
+        logger.info(f'average distance error: {test_dis}')
+        logger.info(f'average t error:')  # todo
+        logger.info(f'average R error:')  # todo
         # tensorboard
-        writer.add_scalars(
-                        "log",
-                        {
-                            'accuracy': accuracy,
-                            'test_dis': test_dis
-                        },
-                        global_step
-                    )
+        # writer.add_scalars(
+        #                 "log",{
+        #                     'accuracy': accuracy,
+        #                     'test_dis': test_dis
+        #                 },
+        #                 global_step
+        #             )
         # save model
-        if test_dis < best_test:
-            best_test = test_dis
+        best_test = min(test_dis, best_test)
         torch.save(estimator.state_dict(), '{0}/pose_model_{1:02d}_{2:06f}.pth'.format(opt.result_dir, epoch, best_test))
         # adjust learning rate if necessary
         if best_test < 0.04 and not opt.first_decay_start:  # 0.016
@@ -224,4 +214,5 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    opt = options()
+    main(opt)

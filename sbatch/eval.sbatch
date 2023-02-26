@@ -18,7 +18,8 @@ singularity exec --nv \
 	    /scratch/work/public/singularity/cuda11.2.2-cudnn8-devel-ubuntu20.04.sif \
 	    /bin/bash -c "source /ext3/env.sh;
                       cd /scratch/gc2720/2301_sim2real;
-                      python eval.py --model /scratch/gc2720/2301_sim2real/results/0209_lr_0.0005/pose_model_99_0.024581.pth \
-					  				 --dataset data_real_new.hdf5 \
+                      python eval.py --model /scratch/gc2720/2301_sim2real/results_self-training/0220_1822/iteration_28/pose_model_0_0.5025613461715136.pth \
+					  				 --dataset data_real.hdf5 \
+									 --split_dir ./split \
 					  				 --split_file eval_on_real.txt"
 					  

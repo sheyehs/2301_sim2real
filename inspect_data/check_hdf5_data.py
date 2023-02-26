@@ -35,6 +35,37 @@ company | part  | condition | image | height
                                                 | t
                                                 | y_min, y_max, x_min, x_max
 
+data.hd5f: {
+    company, str: {
+        part, str: {
+            condition, str: {
+                image index, str, from 000000 to 999999: {
+                    'height', int, 
+                    'width', int, 1920
+                    'K', (3, 3)
+                    'depth', (1200, 1920)
+                    'color', (1200, 1920)
+                    instance index, str, from 00 to 99: {
+                        'mask', bool, (1200, 1920)
+                        'R', (3, 3)
+                        't', (3, 1)
+                        'y_min', minimum row index of boundary box, included
+                        'y_max', maximum row index of boundary box, excluded
+                        'x_min', 
+                        'x_max', 
+                    }
+                }
+            }
+        }
+    }
+}
+
+an example of path to image height:
+/SongFeng/SF-CJd60-097-026/2022-10-05-rvbust_synthetic/000889/height
+
+an example of path to instance mask:
+/Toyota/21092302/2022-10-03-rvbust_synthetic/003334/11/mask
+
 """
 
 
