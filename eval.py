@@ -12,65 +12,76 @@ import open3d as o3d
 from PIL import Image
 import time
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--gpu_id', type=str, default='0', help='GPU id')
-parser.add_argument('--model', type=str, default='',  help='Evaluation model')
-parser.add_argument('--dataset', type=str, default='data.hdf5', help='dataset root dir')
-parser.add_argument('--split_dir', type=str, default='./split')
-parser.add_argument('--split_file', type=str, default='eval.txt')
-parser.add_argument('--pcd_dir', type=str, default='./models')
-parser.add_argument('--num_objects', type=int, default=10)
-args = parser.parse_args()
+def options():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--split_dir', type=str, default='./split')
+    parser.add_argument('--part', type=str, help='part name')
+    parser.add_argument('--gpu_id', type=str, default='0', help='GPU id')
+    parser.add_argument('--workers', type=int, default=10, help='number of data loading workers')
+    parser.add_argument('--noise_trans', default=0.0, help='random noise added to translation')
+    parser.add_argument('--model', type=str, default='',  help='Evaluation model')
+    parser.add_argument('--pcd_dir', type=str, default='./models')
+    return parser.parse_args()
 
-date = time.strftime("%m%d_%H%M")
-output_result_dir = f'./results_eval/{date}'
-os.makedirs(output_result_dir, exist_ok=True)
-out_image_dir = f'./results_eval/{date}/images'
-os.makedirs(out_image_dir, exist_ok=True)
+def main(options):
+    os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu_id
 
-image_shape = (400, 640, 3)
-num_points = 500
-num_rotations = 60
-bs = 1
-knn = KNearestNeighbor(1)
+    opt.dataset_path = './data.hdf5'
+    opt.num_objects = 1
+    opt.result_dir = f'./results_eval/{time.strftime("%m%d_%H%M")}_{opt.part}'
+    os.makedirs(opt.result_dir, exist_ok=True)
+    opt.result_image_dir = f'./results_eval/{opt.result_dir}/images'
+    os.makedirs(opt.result_image_dir, exist_ok=True)
 
-os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu_id
-estimator = PoseNet(num_points=num_points, num_obj=args.num_objects, num_rot=num_rotations)
-estimator.cuda()
-estimator.load_state_dict(torch.load(args.model))
-estimator.eval()
+    opt.image_shape = (400, 640, 3)
+    opt.num_rot = 60
+    opt.num_depth_pixels = 500
+    opt.num_mesh_points = 500
+    opt.split_file = 'eval.txt'
+    knn = KNearestNeighbor(1)
 
-def main():
-    test_dataset = PoseDataset('eval', num_points, False, args.dataset, 0.0, args.split_dir, args.split_file)
+    estimator = PoseNet(num_points=opt.num_depth_pixels, num_obj=args.num_objects, num_rot=num_rot)
+    estimator.cuda()
+    estimator.load_state_dict(torch.load(args.model))
+    estimator.eval()
+
+    test_dataset = PoseDataset('eval', opt. opt.split_file, False, opt.noise_trans)
     test_dataloader = torch.utils.data.DataLoader(test_dataset, batch_size=1, shuffle=False, num_workers=10)
+    
     sym_list = test_dataset.get_sym_list()
     # rot_anchors = torch.from_numpy(estimator.rot_anchors).float().cuda()
     diameter = test_dataset.get_diameter()
-    part_list = test_dataset.get_part_list()
+    idx = torch.tensor([0], dtype=int).cuda()
 
-    success_count = [0 for _ in range(args.num_objects)]
-    num_count = [0 for _ in range(args.num_objects)]
-    fw = open(f'{output_result_dir}/eval_result_logs.txt', 'w')
-
+    success_count = np.zeros(4, dtype=int)
+    num_count = 0
+    eval_dis = 0.0
+    fw = open(f'{opt.result_dir}/eval_result_logs.txt', 'w')
     error_data = 0
+
     for i, data in enumerate(test_dataloader, 0):
-        points, choose, img, target_r, model_points, idx, gt_t, instance_path, K, color = data
-        points, choose, img, target_r, model_points, idx = Variable(points).cuda(), \
+        points, choose, img, target_r, model_points, gt_t, instance_path, K, color = data
+        points, choose, img, target_r, model_points = Variable(points).cuda(), \
                                                                     Variable(choose).cuda(), \
                                                                     Variable(img).cuda(), \
                                                                     Variable(target_r).cuda(), \
                                                                     Variable(model_points).cuda(), \
-                                                                    Variable(idx).cuda()
-        pred_r, pred_t, pred_c = estimator(img, points, choose, idx)
-        pred_t, pred_mask = ransac_voting_layer(points, pred_t)
-        pred_t = pred_t.cpu().data.numpy()
+        with torch.no_grad():
+            pred_r, pred_t, pred_c = estimator(img, points, choose, idx)
         how_min, which_min = torch.min(pred_c, 1)
         pred_r = pred_r[0][which_min[0]].view(-1).cpu().data.numpy()
         pred_r = quaternion_matrix(pred_r)[:3, :3]
+        try:
+            pred_t, pred_mask = ransac_voting_layer(points, pred_t)
+        except:
+            print("RANSAC failed. Skipped.")
+            error_data += 1
+            continue
+        pred_t = pred_t.cpu().data.numpy()
         model_points = model_points[0].cpu().detach().numpy()
         pred = np.dot(model_points, pred_r.T) + pred_t
         target = target_r[0].cpu().detach().numpy() + gt_t.cpu().data.numpy()[0]
-        save_images(idx[0].item(), instance_path, K, color, pred * 1000, target * 1000)
+        save_images(instance_path, K, color, pred * 1000, target * 1000)
 
         if idx[0].item() in sym_list:
             pred = torch.from_numpy(pred.astype(np.float32)).cuda().transpose(1, 0).contiguous()
@@ -81,28 +92,36 @@ def main():
         else:
             dis = np.mean(np.linalg.norm(pred - target, axis=1))
 
-        if dis < 0.1 * diameter[idx[0].item()]:
-            success_count[idx[0].item()] += 1
-            print('{0} Pass! Distance: {1}'.format(instance_path, dis))
-            fw.write('{0} Pass! Distance: {1}\n'.format(instance_path, dis))
-        else:
-            print('{0} NOT Pass! Distance: {1}'.format(instance_path, dis))
-            fw.write('{0} NOT Pass! Distance: {1}\n'.format(instance_path, dis))
-        num_count[idx[0].item()] += 1
+        error_ratio = dis / diameter
+        cond = [error_ratio < 0.05, error_ratio < 0.1, error_ratio < 0.2, error_ratio < 0.5] 
+        success_count[cond] += 1
+        num_count += 1
+        test_dis += dis
+        print('{0} Distance: {1}'.format(instance_path, dis))
+        fw.write('{0} Distance: {1}\n'.format(instance_path, dis))
 
-    accuracy = 0.0
-    for i in range(args.num_objects):
-        accuracy += float(success_count[i]) / num_count[i]
-        print('Object {0} success rate: {1}'.format(part_list[i], float(success_count[i]) / num_count[i]))
-        fw.write('Object {0} success rate: {1}\n'.format(part_list[i], float(success_count[i]) / num_count[i]))
-    print('ALL success rate: {0}'.format(float(sum(success_count)) / sum(num_count)))
-    print('Accuracy: {0}'.format(accuracy / args.num_objects))
-    fw.write('ALL success rate: {0}\n'.format(float(sum(success_count)) / sum(num_count)))
-    fw.write('Accuracy: {0}\n'.format(accuracy / args.num_objects))
-    fw.write('{0} corrupted data'.format(error_data))
+    accuracy = success_count / num_count
+    test_dis = test_dis / num_count 
+    print(f'accuracy of 0.05 diameter: {accuracy[0]}')
+    print(f'accuracy of 0.1 diameter: {accuracy[1]}')
+    print(f'accuracy of 0.2 diameter: {accuracy[2]}')
+    print(f'accuracy of 0.5 diameter: {accuracy[3]}')
+    print(f'average distance error: {test_dis}')
+    print(f'average t error:')  # todo
+    print(f'average R error:')  # todo
+    print('{0} corrupted data'.format(error_data))
+    
+    fw.write(f'accuracy of 0.05 diameter: {accuracy[0]}\n')
+    fw.write(f'accuracy of 0.1 diameter: {accuracy[1]}\n')
+    fw.write(f'accuracy of 0.2 diameter: {accuracy[2]}\n')
+    fw.write(f'accuracy of 0.5 diameter: {accuracy[3]}\n')
+    fw.write(f'average distance error: {test_dis}\n')
+    fw.write(f'average t error:\n')  # todo
+    fw.write(f'average R error:\n')  # todo
+    fw.write('{0} corrupted data\n'.format(error_data))
     fw.close()
 
-def save_images(part_idx, instance_path, K, color, pred, target):
+def save_images(instance_path, K, color, pred, target):
     K = K[0].numpy()
     instance_path = instance_path[0].lstrip('/')
     color = color[0].numpy()
@@ -115,7 +134,7 @@ def save_images(part_idx, instance_path, K, color, pred, target):
     color = projection(K, pred, 'red', color)
     color = projection(K, target, 'green', color)
 
-    file_path = os.path.join(out_image_dir, instance_path)
+    file_path = os.path.join(opt.result_image_dir, instance_path)
     os.makedirs(file_path[:file_path.rfind('/')], exist_ok=True)
     image = Image.fromarray(color)
     image.save(file_path + '.png')
@@ -146,5 +165,6 @@ def projection(K, points, hue, color):
 
 
 if __name__ == '__main__':
-    main()
+    opt = options()
+    main(opt)
 

@@ -224,7 +224,6 @@ class PoseDataset(data.Dataset):
                 self.transform(img_masked),
                 torch.from_numpy(target_r.astype(np.float32)),
                 torch.from_numpy(model_points.astype(np.float32)),
-                torch.LongTensor([obj]),
                 torch.from_numpy(gt_t.astype(np.float32)),
                 instance_path,
                 K,
