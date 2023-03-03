@@ -91,7 +91,7 @@ def main(opt):
                 if i >= 10000:
                     for j, t in enumerate(delta_times):
                         print(j, '\t', t)
-                        exit()
+                    exit()
                 delta_times[0] += lp.print_line()  ###
                 points, choose, img, target_t, target_r, model_points, gt_t = data
                 points, choose, img, target_t, target_r, model_points = Variable(points).cuda(), \
