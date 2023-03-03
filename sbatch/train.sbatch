@@ -1,7 +1,7 @@
 #!/bin/bash
 
-#SBATCH --job-name=SF-CJd60-097-026
-#SBATCH --output=SF-CJd60-097-026.out
+#SBATCH --job-name=6010018CSV
+#SBATCH --output=6010018CSV.out
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=20
@@ -19,7 +19,7 @@ singularity exec --nv \
 	    /bin/bash -c "source /ext3/env.sh;
                       cd /scratch/gc2720/2301_sim2real;
                       python train.py --lr 5e-4 \
-									  --part SF-CJd60-097-026"
+									  --part 6010018CSV"
 
 ## 6010018CSV
 ## 21092302

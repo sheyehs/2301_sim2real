@@ -23,29 +23,29 @@ def options():
     parser.add_argument('--pcd_dir', type=str, default='./models')
     return parser.parse_args()
 
-def main(options):
-    os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu_id
+def main(opt):
+    os.environ['CUDA_VISIBLE_DEVICES'] = opt.gpu_id
 
-    opt.dataset_path = './data.hdf5'
+    opt.dataset_path = './data_real.hdf5'
     opt.num_objects = 1
     opt.result_dir = f'./results_eval/{time.strftime("%m%d_%H%M")}_{opt.part}'
     os.makedirs(opt.result_dir, exist_ok=True)
-    opt.result_image_dir = f'./results_eval/{opt.result_dir}/images'
+    opt.result_image_dir = f'{opt.result_dir}/images'
     os.makedirs(opt.result_image_dir, exist_ok=True)
 
     opt.image_shape = (400, 640, 3)
     opt.num_rot = 60
     opt.num_depth_pixels = 500
     opt.num_mesh_points = 500
-    opt.split_file = 'eval.txt'
+    opt.split_file = 'eval_on_real.txt'
     knn = KNearestNeighbor(1)
 
-    estimator = PoseNet(num_points=opt.num_depth_pixels, num_obj=args.num_objects, num_rot=num_rot)
+    estimator = PoseNet(num_points=opt.num_depth_pixels, num_obj=opt.num_objects, num_rot=opt.num_rot)
     estimator.cuda()
-    estimator.load_state_dict(torch.load(args.model))
+    estimator.load_state_dict(torch.load(opt.model))
     estimator.eval()
 
-    test_dataset = PoseDataset('eval', opt. opt.split_file, False, opt.noise_trans)
+    test_dataset = PoseDataset('eval', opt, opt.split_file, False, opt.noise_trans)
     test_dataloader = torch.utils.data.DataLoader(test_dataset, batch_size=1, shuffle=False, num_workers=10)
     
     sym_list = test_dataset.get_sym_list()
@@ -55,7 +55,7 @@ def main(options):
 
     success_count = np.zeros(4, dtype=int)
     num_count = 0
-    eval_dis = 0.0
+    test_dis = 0.0
     fw = open(f'{opt.result_dir}/eval_result_logs.txt', 'w')
     error_data = 0
 
@@ -65,7 +65,7 @@ def main(options):
                                                                     Variable(choose).cuda(), \
                                                                     Variable(img).cuda(), \
                                                                     Variable(target_r).cuda(), \
-                                                                    Variable(model_points).cuda(), \
+                                                                    Variable(model_points).cuda()
         with torch.no_grad():
             pred_r, pred_t, pred_c = estimator(img, points, choose, idx)
         how_min, which_min = torch.min(pred_c, 1)
@@ -80,7 +80,7 @@ def main(options):
         pred_t = pred_t.cpu().data.numpy()
         model_points = model_points[0].cpu().detach().numpy()
         pred = np.dot(model_points, pred_r.T) + pred_t
-        target = target_r[0].cpu().detach().numpy() + gt_t.cpu().data.numpy()[0]
+        target = target_r[0].cpu().detach().numpy() + gt_t[0].cpu().data.numpy()
         save_images(instance_path, K, color, pred * 1000, target * 1000)
 
         if idx[0].item() in sym_list:
@@ -102,14 +102,6 @@ def main(options):
 
     accuracy = success_count / num_count
     test_dis = test_dis / num_count 
-    print(f'accuracy of 0.05 diameter: {accuracy[0]}')
-    print(f'accuracy of 0.1 diameter: {accuracy[1]}')
-    print(f'accuracy of 0.2 diameter: {accuracy[2]}')
-    print(f'accuracy of 0.5 diameter: {accuracy[3]}')
-    print(f'average distance error: {test_dis}')
-    print(f'average t error:')  # todo
-    print(f'average R error:')  # todo
-    print('{0} corrupted data'.format(error_data))
     
     fw.write(f'accuracy of 0.05 diameter: {accuracy[0]}\n')
     fw.write(f'accuracy of 0.1 diameter: {accuracy[1]}\n')
@@ -145,7 +137,7 @@ def projection(K, points, hue, color):
     normalized_points = points / points[2]  # to normalized plane
     pixels = np.floor(np.matmul(K, normalized_points)[:2]).astype(int)  # project model points to image
     pixels[[0,1]] = pixels[[1,0]]  # swap (x ,y) to (y, x)
-    keep = (pixels[0]>=0) & (pixels[0]<image_shape[0]) & (pixels[1]>=0) & (pixels[1]<image_shape[1])
+    keep = (pixels[0]>=0) & (pixels[0]<opt.image_shape[0]) & (pixels[1]>=0) & (pixels[1]<opt.image_shape[1])
     pixels = pixels[:, keep]
     pixels = np.unique(pixels, axis=1)
 
@@ -157,9 +149,9 @@ def projection(K, points, hue, color):
     pixels = np.concatenate([pixels, i_hue], axis=0)
 
     flat_color = color.ravel()
-    flat_index_array = np.ravel_multi_index(pixels, image_shape)
+    flat_index_array = np.ravel_multi_index(pixels, opt.image_shape)
     flat_color[flat_index_array] = 255
-    color = flat_color.reshape(image_shape)
+    color = flat_color.reshape(opt.image_shape)
 
     return color
 

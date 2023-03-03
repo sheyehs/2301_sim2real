@@ -1,7 +1,7 @@
 #!/bin/bash
 
-#SBATCH --job-name=SF-CJd60-097-026
-#SBATCH --output=SF-CJd60-097-026.out
+#SBATCH --job-name=eval
+#SBATCH --output=eval.out
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=20
@@ -18,7 +18,8 @@ singularity exec --nv \
 	    /scratch/work/public/singularity/cuda11.2.2-cudnn8-devel-ubuntu20.04.sif \
 	    /bin/bash -c "source /ext3/env.sh;
                       cd /scratch/gc2720/2301_sim2real;
-                      python eval.py --model /scratch/gc2720/2301_sim2real/results/0223_2350_SF-CJd60-097-026_lr_0.0005/pose_model_49_0.050993.pth "
+                      python eval.py --model /scratch/gc2720/2301_sim2real/results/0223_2350_SF-CJd60-097-026_lr_0.0005/pose_model_49_0.050993.pth \
+					  				 --part SF-CJd60-097-026"
 					  
 ## 6010018CSV
 ## 21092302

@@ -14,14 +14,28 @@ image_height = 400
 image_width = 640
 
 class PoseDataset(data.Dataset):
-    def __init__(self, mode, opt, split_file, add_noise: bool, noise_trans):
+    def __init__(self, mode, opt):
         """
         mode: train, test, eval, teacher, student
         """
         self.mode = mode
         self.dataset_path = opt.dataset_path
         self.split_dir = opt.split_dir
-        self.split_file = split_file
+
+        assert mode in ['train', 'test', 'eval']
+        if mode == 'train':
+            self.split_file = opt.split_train_file
+            self.add_noise = True
+            self.noise_trans = opt.noise_trans
+        elif mode == 'test':
+            self.split_file = opt.split_test_file
+            self.add_noise = False
+            self.noise_trans = 0.0
+        elif mode == 'eval':
+            self.split_file = opt.split_eval_file
+            self.add_noise = False
+            self.noise_trans = 0.0
+
         self.model_root = './models'
 
         self.part = opt.part
@@ -41,7 +55,7 @@ class PoseDataset(data.Dataset):
 
         item_count = 0
         # collect index
-        file_name =  os.path.join(self.split_dir, self.part, split_file)
+        file_name =  os.path.join(self.split_dir, self.part, self.split_file)
         if not os.path.isfile(file_name):
             print(f'The split list of part {self.part} does not exist! Skipped.')
             return
@@ -84,12 +98,10 @@ class PoseDataset(data.Dataset):
         self.num_pt_mesh = opt.num_mesh_points  # number of points for evaluating R
         self.symmetry_obj_idx = []
 
-        self.add_noise = add_noise
         self.trancolor = transforms.ColorJitter(0.2, 0.2, 0.2, 0.05)
         self.transform = transforms.Compose([transforms.ToTensor(),
                                              transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                                                   std=[0.229, 0.224, 0.225])])
-        self.noise_trans = noise_trans
         
 
     def __getitem__(self, index):

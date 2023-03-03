@@ -5,17 +5,19 @@ from lib.transformations import quaternion_from_matrix
 
 
 def setup_logger(logger_name, log_file, level=logging.INFO):
-    logger = logging.getLogger(logger_name)
     formatter = logging.Formatter('%(asctime)s : %(message)s')
+    # out to file
     fileHandler = logging.FileHandler(log_file, mode='w')
     fileHandler.setFormatter(formatter)
-
-    logger.setLevel(level)
-    logger.addHandler(fileHandler)
-
+    # out to io stream
     streamHandler = logging.StreamHandler()
     streamHandler.setFormatter(formatter)
+
+    logger = logging.getLogger(logger_name)
+    logger.setLevel(level)
+    logger.addHandler(fileHandler)
     logger.addHandler(streamHandler)
+
     return logger
 
 

@@ -12,6 +12,7 @@ from lib.loss import Loss
 from lib.ransac_voting.ransac_voting_gpu import ransac_voting_layer
 from lib.transformations import quaternion_matrix
 from lib.utils import setup_logger
+import debugging
 
 def options():
     parser = argparse.ArgumentParser()
@@ -41,8 +42,8 @@ def main(opt):
     opt.split_train_file = 'train.txt'
     opt.split_test_file = 'test.txt'
 
-    dataset = PoseDataset('train', opt, opt.split_train_file, True, opt.noise_trans)
-    test_dataset = PoseDataset('test', opt, opt.split_test_file, False, 0.0)
+    dataset = PoseDataset('train', opt)
+    test_dataset = PoseDataset('test', opt)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=True, num_workers=opt.workers)
     testdataloader = torch.utils.data.DataLoader(test_dataset, batch_size=1, shuffle=False, num_workers=opt.workers)
 
@@ -84,28 +85,41 @@ def main(opt):
         train_loss_reg_avg = 0.0
         optimizer.zero_grad()
         for rep in range(opt.repeat_epoch):
+            lp = debugging.line_printer()
+            delta_times = [0.0] * 9
             for i, data in enumerate(dataloader):
+                if i >= 10000:
+                    for j, t in enumerate(delta_times):
+                        print(j, '\t', t)
+                        exit()
+                delta_times[0] += lp.print_line()  ###
                 points, choose, img, target_t, target_r, model_points, gt_t = data
                 points, choose, img, target_t, target_r, model_points = Variable(points).cuda(), \
                                                                              Variable(choose).cuda(), \
                                                                              Variable(img).cuda(), \
                                                                              Variable(target_t).cuda(), \
                                                                              Variable(target_r).cuda(), \
-                                                                             Variable(model_points).cuda(), \
-
+                                                                             Variable(model_points).cuda()
+                delta_times[1] += lp.print_line()  ###
                 pred_r, pred_t, pred_c = estimator(img, points, choose, idx)
+                delta_times[2] += lp.print_line()  ###
                 loss, loss_r, loss_t, loss_reg = criterion(pred_r, pred_t, pred_c, target_r, target_t, model_points, idx, diameter)
+                delta_times[3] += lp.print_line()  ###
                 # torch.cuda.empty_cache()
                 loss.backward()
+                delta_times[4] += lp.print_line()  ###
                 train_loss_avg += loss.item()
                 train_loss_r_avg += loss_r.item()
                 train_loss_t_avg += loss_t.item()
                 train_loss_reg_avg += loss_reg.item()
                 train_count += 1
+                delta_times[5] += lp.print_line()  ###
                 if train_count % opt.batch_size == 0:
+                    delta_times[6] += lp.print_line()  ###
                     global_step += 1
                     optimizer.step()
                     optimizer.zero_grad()
+                    delta_times[7] += lp.print_line()  ###
                     # write results to tensorboard
                     writer.add_scalars(
                         "log", {
@@ -123,6 +137,7 @@ def main(opt):
                     train_loss_r_avg = 0.0
                     train_loss_t_avg = 0.0
                     train_loss_reg_avg = 0.0
+                    delta_times[8] += lp.print_line()  ###
 
         print('>>>>>>>>----------epoch {0} train finish---------<<<<<<<<'.format(epoch))
 
