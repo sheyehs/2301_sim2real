@@ -197,6 +197,7 @@ class PoseDataset(data.Dataset):
         if self.mode == 'teacher':
             pass
         else:
+            gt_r = target_r
             target_r = np.dot(model_points, target_r.T)
 
         h.close()
@@ -225,7 +226,8 @@ class PoseDataset(data.Dataset):
                 torch.from_numpy(target_t.astype(np.float32)),
                 torch.from_numpy(target_r.astype(np.float32)),
                 torch.from_numpy(model_points.astype(np.float32)),
-                torch.from_numpy(gt_t.astype(np.float32))
+                torch.from_numpy(gt_t.astype(np.float32)),
+                torch.from_numpy(gt_r.astype(np.float32))
             ]
             return ret
 

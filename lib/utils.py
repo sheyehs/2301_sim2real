@@ -5,7 +5,7 @@ from lib.transformations import quaternion_from_matrix
 
 
 def setup_logger(logger_name, log_file, level=logging.INFO):
-    formatter = logging.Formatter('%(asctime)s : %(message)s')
+    formatter = logging.Formatter('%(asctime)s: %(message)s')
     # out to file
     fileHandler = logging.FileHandler(log_file, mode='w')
     fileHandler.setFormatter(formatter)

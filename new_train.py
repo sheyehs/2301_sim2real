@@ -45,6 +45,7 @@ def options():
     os.makedirs(opt.result_dir, exist_ok=True)
     os.makedirs(os.path.join(opt.result_dir, 'logs'), exist_ok=True)
     os.makedirs(os.path.join(opt.result_dir, 'models'), exist_ok=True)
+    print("-" * 20)
     print("Options:")
     for k, v in opt.__dict__.items():
         print(f'{k}: {v}')
@@ -107,9 +108,7 @@ def train_one_epoch(epoch, run):
     avg_loss_reg = 0.0
     run.optimizer.zero_grad()
     for i, data in enumerate(run.dataloader):
-        if i >= 100:
-            break
-        points, choose, img, target_t, target_r, model_points, gt_t = data
+        points, choose, img, target_t, target_r, model_points, gt_t, _ = data
         points, choose, img, target_t, target_r, model_points, gt_t = \
             points.cuda(), choose.cuda(), img.cuda(), target_t.cuda(),target_r.cuda(), model_points.cuda(), gt_t.cuda()
         # estimate
@@ -120,16 +119,16 @@ def train_one_epoch(epoch, run):
         loss /= opt.batch_size
         loss.backward()
         avg_loss += loss.item()
-        avg_loss_r += loss_r.item() / opt.batch_size
-        avg_loss_t += loss_t.item() / opt.batch_size
-        avg_loss_reg += loss_reg.item() / opt.batch_size
+        avg_loss_r += (loss_r.item() / opt.batch_size)
+        avg_loss_t += (loss_t.item() / opt.batch_size)
+        avg_loss_reg += (loss_reg.item() / opt.batch_size)
         train_count += 1
         if train_count % opt.batch_size == 0:  # batch learning
             run.optimizer.step()
             run.optimizer.zero_grad()
-            logger.info(f'Train time {time.strftime("%Hh %Mm %Ss", time.gmtime(time.time()-run.st_time))} Epoch {epoch}' + \
-                f'Batch {train_count // opt.batch_size} Frame {train_count} \tAvg_loss:{avg_loss}' +  \
-                f'Avg_loss_r: {avg_loss_r} Avg_loss_t: {avg_loss_t} Avg_loss_reg: {avg_loss_reg} ')
+            logger.info(f'Train time {time.strftime("%Hh %Mm %Ss", time.gmtime(time.time()-run.st_time))}\t Epoch {epoch}\t ' + \
+                f'Batch {train_count // opt.batch_size} Frame {train_count}\t Avg_loss:{avg_loss:f}\t ' +  \
+                f'Avg_loss_r: {avg_loss_r:f}\t Avg_loss_t: {avg_loss_t:f}\t Avg_loss_reg: {avg_loss_reg:f}\t ')
             avg_loss = 0.0
             avg_loss_r = 0.0
             avg_loss_t = 0.0
@@ -141,48 +140,43 @@ def train_one_epoch(epoch, run):
 def transform(pred_r, pred_t, pred_c, points, target_r, model_points, gt_t):
     assert len(pred_c.shape) == 1, pred_c.shape
     assert len(pred_r.shape) == 2 and pred_r.shape[1] == 4, pred_r.shape
-    assert len(points.shape) == 3 and points.shape[0] == 1 and points.shape[2] == 3, f'{points.shape}'
-    assert len(pred_t.shape) == 3 and pred_t.shape[0] == 1 and pred_t.shape[2] == 3, f'{pred_t.shape}'
-    print(len(model_points.shape), model_points.shape[1])
+    assert len(points.shape) == 3 and points.shape[0] == 1 and points.shape[2] == 3, points.shape
+    assert len(pred_t.shape) == 3 and pred_t.shape[0] == 1 and pred_t.shape[2] == 3, pred_t.shape
     assert len(model_points.shape) == 2 and model_points.shape[1] == 3, model_points.shape
-    assert len(target_r.shape) == 2 and target_r.shape[1] == 3, f'{target_r.shape}'
-    assert gt_t.shape == 3
+    assert len(target_r.shape) == 2 and target_r.shape[1] == 3, target_r.shape
+    assert len(gt_t.shape) == 1 and gt_t.shape[0] == 3, gt_t.shape
     
-    # transform
-    print(pred_c)
     how_min, which_min = torch.min(pred_c, dim=0)
-    print(how_min, which_min)
     pred_r = pred_r[which_min].cpu().data.numpy()
     pred_r = quaternion_matrix(pred_r)[:3, :3]
-    pred_r = torch.tensor(pred_r).cuda()
+    pred_r = torch.tensor(pred_r).float().cuda()
     try:
         pred_t, _ = ransac_voting_layer(points, pred_t)
+        pred_t = pred_t[0].float()
     except:
         print("RANSAC failed. Skipped.")
         return None
-    pred_ps = np.matmul(model_points, pred_r.T) + pred_t
+    pred_ps = torch.matmul(model_points, pred_r.T) + pred_t
     target_ps = target_r + gt_t
-    return pred_ps, target_ps, how_min
+    return pred_t, pred_r, pred_ps, target_ps, how_min
 
 
 def compute_metric(run, pred_ps, target_ps, pred_t, target_t, pred_r, target_r):
-    assert len(pred_ps.shape) == 2
-    assert pred_ps.shape[1] == 3
-    assert len(target_ps.shape) == 2
-    assert target_ps.shape[1] == 3
-    assert pred_t.shape == (3, 1)
-    assert target_t.shape == (3, 1)
-    assert pred_r.shape == (3, 3)
-    assert target_r.shape == (3, 3)
+    assert len(pred_ps.shape) == 2 and pred_ps.shape[1] == 3, pred_ps.shape
+    assert len(target_ps.shape) == 2 and target_ps.shape[1] == 3, target_ps.shape
+    assert len(pred_t.shape) == 1 and pred_t.shape[0] == 3, pred_t.shape
+    assert len(target_t.shape) == 1 and target_t.shape[0] == 3, target_t.shape
+    assert pred_r.shape == (3, 3), pred_r.shape
+    assert target_r.shape == (3, 3), target_r.shape
 
     metric = {}
     metric["dist_error"] = torch.mean(torch.linalg.norm(pred_ps - target_ps, dim=1)).item()
     metric["adj_dist_error"] = metric["dist_error"] / run.diameter
 
-    metric["t_error"] = torch.linalg.norm(pred_t - target_t)
+    metric["t_error"] = torch.linalg.norm(pred_t - target_t).item()
     metric["adj_t_error"] = metric["t_error"] / run.diameter
 
-    diff_r = torch.matmul(target_r, pred_r.T)  # use target_r = diff_r * pred_r
+    diff_r = torch.matmul(target_r, pred_r.T).cpu().numpy()  # use target_r = diff_r * pred_r
     diff_angle = np.rad2deg(np.arccos((np.trace(diff_r) - 1) / 2))  #
     metric["angle_error"] = diff_angle
 
@@ -215,26 +209,26 @@ def test_one_epoch(epoch, run):
     test_count = 0
     average_metric = {}
     for i, data in enumerate(run.test_dataloader):
-        if i >= 100:
-            break
-        points, choose, img, target_t, target_r, model_points, gt_t = data
-        points, choose, img, target_t, target_r, model_points, gt_t = \
-            points.cuda(), choose.cuda(), img.cuda(), target_t.cuda(), target_r.cuda(), model_points.cuda(), gt_t.cuda()
+        points, choose, img, target_t, target_r, model_points, gt_t, gt_r = data
+        points, choose, img, target_t, target_r, model_points, gt_t, gt_r = \
+            points.cuda(), choose.cuda(), img.cuda(), target_t.cuda(), target_r.cuda(), model_points.cuda(), gt_t.cuda(), gt_r.cuda()
+        # estimation
         with torch.no_grad():
             pred_r, pred_t, pred_c = run.estimator(img, points, choose, run.index)
         pred_r, pred_t, pred_c = pred_r.detach(), pred_t.detach(), pred_c.detach()
         loss, _, _, _ = run.criterion(pred_r, pred_t, pred_c, target_r, target_t, model_points, \
             run.index, run.diameter)
-        # evalaution
+        # transformation
         ps = transform(pred_r[0], pred_t, pred_c[0], points.detach(), target_r[0], model_points[0].detach(), gt_t[0])
         if ps is None:
             continue
-        pred_ps, target_ps, how_min = ps
+        pred_t, pred_r, pred_ps, target_ps, how_min = ps
         # metric
-        single_metric = compute_metric(run, pred_ps, target_ps, pred_t, target_t, pred_r, target_r)
+        single_metric = compute_metric(run, pred_ps, target_ps, pred_t, gt_t[0], pred_r, gt_r[0])
         average_metric = record_metric(single_metric, average_metric)
-        logger.info(f"Test time {time.strftime('%Hh %Mm %Ss', time.gmtime(time.time() - run.st_time))} Epoch {epoch} \
-                    Test Frame {test_count} Avg_loss:{loss:f} confidence:{how_min:f} distance:{single_metric['dist_error']:f}")
+        # log
+        logger.info(f"Test time {time.strftime('%Hh %Mm %Ss', time.gmtime(time.time() - run.st_time))}\t Epoch {epoch}\t \
+                    Test Frame\t {test_count}\t Avg_loss:{loss:f}\t confidence:{how_min:f}\t distance:{single_metric['dist_error']:f}")
         test_count += 1
         
     # log results for this test epoch
