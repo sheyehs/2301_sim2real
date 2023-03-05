@@ -15,23 +15,24 @@ image_width = 640
 
 class PoseDataset(data.Dataset):
     def __init__(self, mode, opt):
-        """
-        mode: train, test, eval, teacher, student
-        """
+        assert mode in ['train', 'test', 'eval']
+
         self.mode = mode
         self.dataset_path = opt.dataset_path
         self.split_dir = opt.split_dir
 
-        assert mode in ['train', 'test', 'eval']
         if mode == 'train':
+            self.dataset_path = opt.dataset_path
             self.split_file = opt.split_train_file
             self.add_noise = True
             self.noise_trans = opt.noise_trans
         elif mode == 'test':
+            self.dataset_path = opt.dataset_path
             self.split_file = opt.split_test_file
             self.add_noise = False
             self.noise_trans = 0.0
         elif mode == 'eval':
+            self.dataset_path = opt.eval_dataset_path
             self.split_file = opt.split_eval_file
             self.add_noise = False
             self.noise_trans = 0.0
@@ -202,48 +203,26 @@ class PoseDataset(data.Dataset):
 
         h.close()
 
-        if self.mode == 'teacher':
-            # no target_R, target_t and gt_t
-            ret = [
-                torch.from_numpy(cloud.astype(np.float32)),
-                torch.LongTensor(choose.astype(np.int32)),
-                self.transform(img_masked),
-                torch.from_numpy(model_points.astype(np.float32)),
-                torch.LongTensor([obj]),
-                instance_path, 
-                K, 
-                img.shape[:2], 
-                torch.tensor([rmin, rmax, cmin, cmax], dtype=int), 
-                mask_label[rmin:rmax, cmin:cmax]
-            ]
+        ret = [
+            torch.from_numpy(cloud.astype(np.float32)),
+            torch.LongTensor(choose.astype(np.int32)),
+            self.transform(img_masked),
+            torch.from_numpy(target_t.astype(np.float32)),
+            torch.from_numpy(target_r.astype(np.float32)),
+            torch.from_numpy(model_points.astype(np.float32)),
+            torch.from_numpy(gt_t.astype(np.float32)),
+            torch.from_numpy(gt_r.astype(np.float32))
+        ]
+        if self.mode in ['train', 'test']:
             return ret
-
-        elif self.mode == 'train' or self.mode == 'test' or self.mode == 'student':
-            ret = [
-                torch.from_numpy(cloud.astype(np.float32)),
-                torch.LongTensor(choose.astype(np.int32)),
-                self.transform(img_masked),
-                torch.from_numpy(target_t.astype(np.float32)),
-                torch.from_numpy(target_r.astype(np.float32)),
-                torch.from_numpy(model_points.astype(np.float32)),
-                torch.from_numpy(gt_t.astype(np.float32)),
-                torch.from_numpy(gt_r.astype(np.float32))
-            ]
-            return ret
-
-        elif self.mode == 'eval':  # need pass K and image to prject pred points onto
-            ret = [
-                torch.from_numpy(cloud.astype(np.float32)),
-                torch.LongTensor(choose.astype(np.int32)),
-                self.transform(img_masked),
-                torch.from_numpy(target_r.astype(np.float32)),
-                torch.from_numpy(model_points.astype(np.float32)),
-                torch.from_numpy(gt_t.astype(np.float32)),
+        elif self.mode in ['eval']:
+            ret += [
                 instance_path,
-                K,
-                np.array(img)
+                torch.from_numpy(K),
+                torch.from_numpy(np.array(img))
             ]
             return ret
+        
 
     def __len__(self):
         return self.length
