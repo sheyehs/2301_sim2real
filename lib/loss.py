@@ -52,7 +52,7 @@ def loss_calculation(pred_r, pred_t, pred_c, target_r, target_t, model_points, i
     dis = torch.mean(torch.norm((pred_r - target_r), dim=2), dim=1)
     dis = dis / obj_diameter   # normalize by diameter
     pred_c = pred_c.contiguous().view(bs*num_rot)
-    loss_r = torch.mean(dis / pred_c + torch.log(pred_c), dim=0)
+    loss_r = torch.mean(dis / pred_c + torch.log(pred_c), dim=0)  # todo: why loss_r is unlated to pred_r?
     # translation loss
     loss_t = F.smooth_l1_loss(pred_t, target_t, reduction='mean')
     # total loss

@@ -1,7 +1,7 @@
 #!/bin/bash
 
-#SBATCH --job-name=new_train
-#SBATCH --output=new_21092302.out
+#SBATCH --job-name=eval
+#SBATCH --output=SongFeng_306.out
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=20
@@ -18,10 +18,9 @@ singularity exec --nv \
 	/scratch/work/public/singularity/cuda11.2.2-cudnn8-devel-ubuntu20.04.sif \
 	/bin/bash -c "source /ext3/env.sh;
 		cd /scratch/gc2720/2301_sim2real;
-		python new_train.py \
-			--lr 5e-4 \
-			--part 21092302 \
-			--num_epoch 50"
+		python new_eval.py \
+			--part SongFeng_306 \
+			--model_path /scratch/gc2720/2301_sim2real/results/0306_0920_SongFeng_306_0.0005/models/pose_model_49_0.004475.pth"
 
 ## 6010018CSV
 ## 21092302

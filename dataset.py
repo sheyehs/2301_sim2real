@@ -18,7 +18,6 @@ class PoseDataset(data.Dataset):
         assert mode in ['train', 'test', 'eval']
 
         self.mode = mode
-        self.dataset_path = opt.dataset_path
         self.split_dir = opt.split_dir
 
         if mode == 'train':

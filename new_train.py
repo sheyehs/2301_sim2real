@@ -12,7 +12,6 @@ from lib.ransac_voting.ransac_voting_gpu import ransac_voting_layer
 from lib.transformations import quaternion_matrix
 from lib.utils import setup_logger
 from types import SimpleNamespace
-import debugging
 
 def options():
     parser = argparse.ArgumentParser()
@@ -42,8 +41,9 @@ def options():
     # result
     opt.outpur_dir = os.path.join(opt.output_root, f'{time.strftime("%m%d_%H%M")}_{opt.part}_{opt.lr}')
     os.makedirs(opt.outpur_dir, exist_ok=True)
-    print("-" * 20)
+    print("=" * 20)
     print("Options:")
+    print("-" * 20)
     for k, v in opt.__dict__.items():
         print(f'{k}: {v}')
     print("-" * 20)
@@ -111,16 +111,19 @@ def train_one_epoch(epoch, run):
     avg_loss_reg = 0.0
     run.optimizer.zero_grad()
     for i, data in enumerate(run.dataloader):
-        if i >= 100:
-            break
+        # if i >= 100:
+        #     break
         points, choose, img, target_t, target_r, model_points, gt_t, _ = data
         points, choose, img, target_t, target_r, model_points, gt_t = \
             points.cuda(), choose.cuda(), img.cuda(), target_t.cuda(),target_r.cuda(), model_points.cuda(), gt_t.cuda()
         # estimate
         pred_r, pred_t, pred_c = run.estimator(img, points, choose, run.index)
+        # pred_c[pred_c <= 0] = 1e-50  # todo: how to modify loss_r so that dis/pred_c and log(pred_c) do not get invalid value 
         # loss
         loss, loss_r, loss_t, loss_reg = run.criterion(pred_r, pred_t, pred_c, target_r, target_t, model_points, \
             run.index, run.diameter)
+        if loss_r == np.nan:  # temporarily used to terminate the training and begin eval
+            return -1
         loss /= opt.batch_size
         loss.backward()
         avg_loss += loss.item()
@@ -188,7 +191,7 @@ def compute_metric(run, pred_ps, target_ps, pred_t, target_t, pred_r, target_r):
     metric["adj_t_error"] = metric["t_error"] / run.diameter
 
     diff_r = torch.matmul(target_r, pred_r.T).cpu().numpy()  # use target_r = diff_r * pred_r
-    diff_angle = np.rad2deg(np.arccos((np.trace(diff_r) - 1) / 2))  #
+    diff_angle = np.rad2deg(np.clip(np.arccos((np.trace(diff_r) - 1) / 2), 0, 1))  #
     metric["angle_error"] = diff_angle
 
     return metric
@@ -199,15 +202,16 @@ def record_metric(single_metric, average_metric):  # todo: rewrite as a class
         "angle_error": [5, 10, 20, 30]}
     # average error
     for k, v in single_metric.items():
-        average_metric['avg_'+k] = average_metric.get(k, 0) + v
+        avg_k = 'avg_' + k
+        average_metric[avg_k] = average_metric.get(avg_k, 0) + v
     # success count with different threshold
     for m, thresh in success_thresholds.items():
         for t in thresh:
-            k = str(t) + '_' + m
-            if k not in average_metric.keys():  # make sure every key exists when printing
-                average_metric[k] = 0
+            count_k = str(t) + '_' + m
+            if count_k not in average_metric.keys():  # make sure every key exists when printing
+                average_metric[count_k] = 0
             if single_metric[m] < t:
-                average_metric[k] += 1
+                average_metric[count_k] += 1
 
     return average_metric
 
@@ -220,8 +224,8 @@ def test_one_epoch(epoch, run):
     test_count = 0
     average_metric = {}
     for i, data in enumerate(run.test_dataloader):
-        if i >= 100:
-            break
+        # if i >= 100:
+        #     break
         points, choose, img, target_t, target_r, model_points, gt_t, gt_r = data
         points, choose, img, target_t, target_r, model_points, gt_t, gt_r = \
             points.cuda(), choose.cuda(), img.cuda(), target_t.cuda(), target_r.cuda(), model_points.cuda(), gt_t.cuda(), gt_r.cuda()
@@ -257,7 +261,7 @@ def test_one_epoch(epoch, run):
     if average_metric['avg_dist_error'] < run.best_metric:
         run.best_metric = average_metric['avg_dist_error']
         with open(os.path.join(opt.outpur_dir, 'best_models.txt'), 'a') as f:  # append the path
-            f.write(model_save_path)  # the last line of model can be used to evaluate performance
+            f.write(model_save_path + '\n')  # the last line of model can be used to evaluate performance
     # adjust learning rate if necessary
     if run.best_metric < run.first_decay_thresh and not run.first_decay_start:
         run.first_decay_start = True
@@ -270,21 +274,22 @@ def test_one_epoch(epoch, run):
 
     print(f'>>>>>>>>----------epoch {epoch} test finish---------<<<<<<<<')
 
-
 # eval ===============================================
 
 def init_eval(opt):
     run = SimpleNamespace()
+    run.part = opt.part
+    run.logger = setup_logger(f'eval', os.path.join(opt.outpur_dir, f'eval_log.txt'))
     run.eval_dataset = PoseDataset('eval', opt)
     run.eval_dataloader = torch.utils.data.DataLoader(run.eval_dataset, batch_size=1, shuffle=False, num_workers=opt.num_workers)
-    run.diameter = run.dataset.get_diameter()
-    print('>>>>>>>>----------Dataset loaded!---------<<<<<<<<')
-    print('length of the evaluation set: {0}'.format(len(run.dataset)))
-    print('diameter of the part: {0} m'.format(run.diameter))
+    run.diameter = run.eval_dataset.get_diameter()
+    run.logger.info('>>>>>>>>----------Dataset loaded!---------<<<<<<<<')
+    run.logger.info('length of the evaluation set: {0}'.format(len(run.eval_dataloader)))
+    run.logger.info('diameter of the part: {0} m'.format(run.diameter))
     # network
     with open(os.path.join(opt.outpur_dir, 'best_models.txt'), 'r') as f: 
-        f.seek(-1)
-        eval_model_path = f.readline()
+        lines = f.readlines()
+        eval_model_path = lines[-1].strip()  # remove \n
     run.estimator = PoseNet(num_points=opt.num_depth_pixels, num_obj=opt.num_objects, num_rot=opt.num_rot_anchors)
     run.estimator.load_state_dict(torch.load(eval_model_path))
     run.estimator.cuda()
@@ -299,6 +304,8 @@ def init_eval(opt):
     # output
     run.output_eval_images_dir = os.path.join(opt.outpur_dir, 'images')
     os.makedirs(run.output_eval_images_dir, exist_ok=True)
+    run.logger.info(f'Eval time {time.strftime("%Hh %Mm %Ss", time.gmtime(time.time() - run.st_time))}, started')
+    return run
 
 
 def project_to_image(run, instance_path, K, color, pred_ps, target_ps):
@@ -308,21 +315,26 @@ def project_to_image(run, instance_path, K, color, pred_ps, target_ps):
     assert len(pred_ps.shape) == 2 and pred_ps.shape[1] == 3, pred_ps.shape
     assert len(target_ps.shape) == 2 and target_ps.shape[1] == 3, target_ps.shape
 
-    for hue in ['red', 'green']:
-        points = points.transpose()  # to (3, N)
-        normalized_points = points[:2] / points[2]  # to normalized plane
-        pixels = torch.floor(torch.matmul(K, normalized_points)).int()  # project model points to image
+    color = color.cpu().numpy()
+
+    for points, hue in [[pred_ps, 'red'], [target_ps, 'green']]:
+        points = points.T # to (3, N)
+        normalized_points = points / points[2]  # to normalized plane
+        pixels = torch.floor(torch.matmul(K, normalized_points)[:2]).int()  # project model points to image
         pixels[[0,1]] = pixels[[1,0]]  # swap (x ,y) to (y, x)
         keep = (pixels[0]>=0) & (pixels[0]<run.image_shape[0]) & (pixels[1]>=0) & (pixels[1]<run.image_shape[1])
         pixels = pixels[:, keep]
         pixels = torch.unique(pixels, dim=1)
+        if len(pixels.shape) < 2:
+            return
+        
         if hue == 'red':
-            i_hue = torch.full((1, pixels.shape[1]), 0, dtype=int)
+            i_hue = torch.full((1, pixels.shape[1]), 0, dtype=int).cuda()
         elif hue == 'green':
-            i_hue = torch.full((1, pixels.shape[1]), 1, dtype=int)
-        pixels = torch.concatenate([pixels, i_hue], axis=0)
+            i_hue = torch.full((1, pixels.shape[1]), 1, dtype=int).cuda()
+        pixels = torch.cat([pixels, i_hue], dim=0)
 
-        color = color.cpu().numpy()
+        pixels = pixels.cpu().numpy()
         flat_color = color.ravel()
         flat_index_array = np.ravel_multi_index(pixels, run.image_shape)
         flat_color[flat_index_array] = 255
@@ -335,11 +347,11 @@ def project_to_image(run, instance_path, K, color, pred_ps, target_ps):
 
 
 def eval(run):
-    logger = setup_logger(f'eval', os.path.join(opt.outpur_dir, f'eval_log.txt'))
-    logger.info(f'Eval time {time.strftime("%Hh %Mm %Ss", time.gmtime(time.time() - run.st_time))}, started')
     eval_count = 0
     average_metric = {}
     for i, data in enumerate(run.eval_dataloader):
+        # if i >= 100:
+        #     break
         points, choose, img, target_t, target_r, model_points, gt_t, gt_r, instance_path, K, color = data
         points, choose, img, target_t, target_r, model_points, gt_t, gt_r = \
             points.cuda(), choose.cuda(), img.cuda(), target_t.cuda(), target_r.cuda(), model_points.cuda(), gt_t.cuda(), gt_r.cuda()
@@ -356,27 +368,27 @@ def eval(run):
             continue
         pred_t, pred_r, pred_ps, target_ps, how_min = ps
         # projection. save images
-        project_to_image(run, instance_path[0], K[0], color, pred_ps * 1000, target_ps * 1000)  # need to convert m to mm
+        project_to_image(run, instance_path[0], K[0].float(), color[0], pred_ps * 1000, target_ps * 1000)  # need to convert m to mm
         # metric
         single_metric = compute_metric(run, pred_ps, target_ps, pred_t, gt_t[0], pred_r, gt_r[0])
         average_metric = record_metric(single_metric, average_metric)
         # log
-        logger.info(f"Eval time {time.strftime('%Hh %Mm %Ss', time.gmtime(time.time() - run.st_time))}\t \
+        run.logger.info(f"Eval time {time.strftime('%Hh %Mm %Ss', time.gmtime(time.time() - run.st_time))}\t \
                     Test Frame\t {eval_count}\t Avg_loss:{loss:f}\t confidence:{how_min:f}\t distance:{single_metric['dist_error']:f}")
         eval_count += 1
         
     # log results for this test epoch
-    logger.info(f'Eval time {time.strftime("%Hh %Mm %Ss", time.gmtime(time.time() - run.st_time))} {opt.part} EVAL FINISH ')
+    run.logger.info(f'Eval time {time.strftime("%Hh %Mm %Ss", time.gmtime(time.time() - run.st_time))} {run.part} EVAL FINISH ')
     # compute and display average  
-    print_average_metric(average_metric, eval_count, logger) 
+    print_average_metric(average_metric, eval_count, run.logger) 
     
 
 def print_average_metric(average_metric, eval_count, logger):
-    print('=' * 20)
+    logger.info('=' * 20)
     for k, v in average_metric.items():
         average_metric[k] = v / eval_count 
-        logger.info('-' * 20)
         logger.info(f'{k}: {average_metric[k]:f}')
+        logger.info('-' * 20)
 
 
 if __name__ == '__main__':
@@ -387,10 +399,13 @@ if __name__ == '__main__':
 
     run = init(opt)
     for epoch in range(opt.num_epoch):
-        train_one_epoch(epoch, run)
+        status = train_one_epoch(epoch, run)
+        if status == -1:
+            break  # for loss_r is nan
+
         if epoch % opt.test_per_num_epoch == 0:
             test_one_epoch(epoch, run)
     del run
 
-    # run = init_eval(opt)
-    # eval(run)
+    run = init_eval(opt)
+    eval(run)
