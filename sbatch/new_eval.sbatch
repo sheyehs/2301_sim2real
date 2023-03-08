@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH --job-name=eval
-#SBATCH --output=SongFeng_306.out
+#SBATCH --output=SF-CJd60-097-026.out
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=20
@@ -19,8 +19,8 @@ singularity exec --nv \
 	/bin/bash -c "source /ext3/env.sh;
 		cd /scratch/gc2720/2301_sim2real;
 		python new_eval.py \
-			--part SongFeng_306 \
-			--model_path /scratch/gc2720/2301_sim2real/results/0306_0920_SongFeng_306_0.0005/models/pose_model_49_0.004475.pth"
+			--part SF-CJd60-097-026 \
+			--model_path /scratch/gc2720/2301_sim2real/results/0306_0920_SF-CJd60-097-026_0.0005/models/pose_model_26_0.052537.pth"
 
 ## 6010018CSV
 ## 21092302

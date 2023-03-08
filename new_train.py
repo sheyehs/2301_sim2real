@@ -202,8 +202,12 @@ def record_metric(single_metric, average_metric):  # todo: rewrite as a class
         "angle_error": [5, 10, 20, 30]}
     # average error
     for k, v in single_metric.items():
-        avg_k = 'avg_' + k
-        average_metric[avg_k] = average_metric.get(avg_k, 0) + v
+        if np.isfinite(v):
+            avg_k = 'avg_' + k
+            average_metric[avg_k] = average_metric.get(avg_k, 0) + v
+        else:
+            nan_k = 'nan_' + k
+            average_metric[nan_k] = average_metric.get(nan_k, 0) + 1
     # success count with different threshold
     for m, thresh in success_thresholds.items():
         for t in thresh:
@@ -214,6 +218,14 @@ def record_metric(single_metric, average_metric):  # todo: rewrite as a class
                 average_metric[count_k] += 1
 
     return average_metric
+
+
+def print_average_metric(average_metric, eval_count, logger):
+    logger.info('=' * 20)
+    for k, v in average_metric.items():
+        average_metric[k] = v / eval_count 
+        logger.info(f'{k}: {average_metric[k]:f}')
+        logger.info('-' * 20)
 
 
 def test_one_epoch(epoch, run):
@@ -373,22 +385,13 @@ def eval(run):
         single_metric = compute_metric(run, pred_ps, target_ps, pred_t, gt_t[0], pred_r, gt_r[0])
         average_metric = record_metric(single_metric, average_metric)
         # log
-        run.logger.info(f"Eval time {time.strftime('%Hh %Mm %Ss', time.gmtime(time.time() - run.st_time))}\t \
-                    Test Frame\t {eval_count}\t Avg_loss:{loss:f}\t confidence:{how_min:f}\t distance:{single_metric['dist_error']:f}")
+        run.logger.info(f"Frame {eval_count} Avg_loss:{loss:f} confidence:{how_min:f} {single_metric}")
         eval_count += 1
         
     # log results for this test epoch
     run.logger.info(f'Eval time {time.strftime("%Hh %Mm %Ss", time.gmtime(time.time() - run.st_time))} {run.part} EVAL FINISH ')
     # compute and display average  
     print_average_metric(average_metric, eval_count, run.logger) 
-    
-
-def print_average_metric(average_metric, eval_count, logger):
-    logger.info('=' * 20)
-    for k, v in average_metric.items():
-        average_metric[k] = v / eval_count 
-        logger.info(f'{k}: {average_metric[k]:f}')
-        logger.info('-' * 20)
 
 
 if __name__ == '__main__':

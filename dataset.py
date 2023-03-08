@@ -46,7 +46,7 @@ class PoseDataset(data.Dataset):
             self.label_dir = label_dir
 
         self.cam_scale = 1000.0
-        self.depth_scale = 22.0  # to do: change
+        self.depth_scale = 22.0  # to do: change to 65536 / 3000
 
         self.list_image = []
         self.list_path = []  # instance number
